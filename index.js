@@ -1,6 +1,7 @@
 import { extension_settings, getContext } from '../../../extensions.js';
 import { saveSettingsDebounced, eventSource, event_types } from '../../../../script.js';
 
+const ORIGIN_VER = 'v0.3 · 09-04e';
 const MOD = 'origin';
 const INJ_KEY = 'origin_state';
 const DEFAULT_GACHA = [
@@ -78,7 +79,6 @@ function tRemain(t){ if(!t.limit || t.limit<=0) return null; const elapsed=curTu
 function checkExpiry(){ const st=meta(); if(!st) return; let ch=false; for(const t of st.tasks){ if(t.status==='active'){ const r=tRemain(t); if(r!==null && r<=0){ t.status='failed'; applyEffects(st,t.penalty,-1); pushLog(st,'任务「'+t.title+'」超时失败'+(t.penalty?'　'+t.penalty:''),'!'); if(settings().punishEvent){ st.pendingEvent=st.pendingEvent||[]; st.pendingEvent.push('任务「'+t.title+'」超时失败'+(t.penalty?'（'+t.penalty+'）':'')+'，请让剧情出现一个相称的不利后果'+(settings().penaltyPref?'（后果倾向：'+settings().penaltyPref+'）':'')); } ch=true; } } } if(ch) saveMeta(); }
 function allowNewTask(st){
   const s = settings();
-  if(st.tasks.filter(t=>t.status==='active').length===0) return true;
   if(curTurn() - st.lastTaskTurn < s.freq) return false;
   if(s.blockWhenUnfinished && st.tasks.some(t=>t.status==='active' && (t.type==='主线'||t.type==='支线'))) return false;
   return true;
@@ -188,6 +188,10 @@ function applyEffects(st, str, sign){
     st2.val += cleanNum(m[2]);
   }
 }
+function extractProseTitle(text){ if(!text) return ''; text=String(text);
+  let m=text.match(/【[^】]{0,12}任务[^：:】]{0,8}[：:]\s*([^】\n]{2,40})】/); if(m) return m[1].trim();
+  m=text.match(/任务[一二三四五六七八九十\d]{0,3}\s*[：:]\s*([^。！？\n】]{2,40})/); if(m) return m[1].trim();
+  return ''; }
 function pushLog(st,text,mark){ st.log.push({text, mark:mark||''}); if(st.log.length>40) st.log=st.log.slice(-40); }
 function doneCount(st){ return st.tasks.filter(t=>t.status==='done').length; }
 function hasAch(st,id){ return (st.achievements||[]).some(a=>a.id===id); }
@@ -202,16 +206,16 @@ function checkAchievements(){ const st=meta(); if(!st||!settings().achieveOn) re
 
 
 function completeTask(st,t){ if(!t||t.status!=='active') return; t.status='done'; t.progress=100; applyEffects(st,t.reward,1); const gain=t.type==='主线'?50:t.type==='支线'?20:10; st.exp+=gain; while(st.exp>=st.expMax){ st.exp-=st.expMax; st.level++; st.expMax=Math.round(st.expMax*1.4); } pushLog(st,'完成「'+t.title+'」'+(t.reward?'　奖励：'+t.reward:''),'✓'); }
-function applyBlock(memo){
+function applyBlock(memo, proseTitle){
   const st = meta(); if(!st) return;
-  st.lastRaw = memo;
+  st.lastRaw = memo; proseTitle=proseTitle||'';
   const lines = memo.split('\n').map(l=>l.trim()).filter(l=>l && l!=='无');
   let changed = 0, gotNew=false, _newG=[];
   for(const line of lines){
     const p = line.split('|').map(x=>x.trim());
     const tag = p[0];
     if(tag==='进度'){ let t=findTask(st,p[1]);
-      if(!t){ const _d=(p[3]||'').replace(/^\s*(系统)?\s*(发布|派发|激活|新增)?\s*(了)?\s*(新任务|任务)?\s*[：:，,\-]*\s*/,'').trim(); if(_d && _d.length>=4 && !/^(新任务)?(发布|激活)?$/.test(_d)){ t={id:st.nextId++, type:'支线', owner:((settings().bindTo&&settings().bindTo!=='宿主')?settings().bindTo:'宿主'), title:_d.slice(0,24), desc:_d, cond:'', reward:'', penalty:'', limit:0, progress:0, status:'active', turn:curTurn(), startTurn:curTurn()}; st.tasks.push(t); st.lastTaskTurn=curTurn(); pushLog(st,'（自动补建任务）'+t.title,'·'); } }
+      if(!t){ const _d=(p[3]||'').replace(/^\s*(系统)?\s*(发布|派发|激活|新增)?\s*(了)?\s*(新任务|任务)?\s*[：:，,\-]*\s*/,'').trim(); const _title=proseTitle||_d.slice(0,24); if((proseTitle || (_d && _d.length>=4 && !/^(新任务)?(发布|激活)?$/.test(_d)))){ t={id:st.nextId++, type:'支线', owner:((settings().bindTo&&settings().bindTo!=='宿主')?settings().bindTo:'宿主'), title:_title, desc:_d||_title, cond:'', reward:'', penalty:'', limit:0, progress:0, status:'active', turn:curTurn(), startTurn:curTurn()}; st.tasks.push(t); st.lastTaskTurn=curTurn(); pushLog(st,'（自动补建任务）'+t.title,'·'); } }
       if(t){ t.progress=Math.max(0,Math.min(100,cleanNum(p[2]))); if(p[3]) pushLog(st,t.title+'：'+p[3]); if(t.status==='active' && t.progress>=100){ completeTask(st,t); } changed++; } }
     else if(tag==='完成'){ const t=findTask(st,p[1]); if(t && t.status==='active'){ completeTask(st,t); changed++; } }
     else if(tag==='失败'){ const t=findTask(st,p[1]); if(t && t.status==='active'){ t.status='failed'; applyEffects(st,t.penalty,-1); pushLog(st,'任务「'+t.title+'」失败'+(t.penalty?'　'+t.penalty:''),'!'); if(settings().punishEvent){ st.pendingEvent=st.pendingEvent||[]; st.pendingEvent.push('任务「'+t.title+'」失败'+(t.penalty?'（'+t.penalty+'）':'')+'，请让剧情出现一个相称的不利后果'+(settings().penaltyPref?'（后果倾向：'+settings().penaltyPref+'）':'')); } changed++; } }
@@ -223,6 +227,7 @@ function applyBlock(memo){
       if(hasLabel){ ty=g('类型'); title=(g('标题','名称')||'').trim(); desc=g('描述','说明'); cond=g('完成条件','条件'); reward=g('奖励'); penalty=g('失败惩罚','惩罚','罚'); lim=cleanNum(g('时限')); }
       else { ty=p[1]; title=(p[2]||'').trim(); desc=p[3]||''; cond=p[4]||''; reward=p[5]||''; penalty=p[6]||''; lim=p[7]?cleanNum(p[7]):0; }
       if(!lim){ const _m=line.match(/时限\s*[：:]?\s*(\d+)/); if(_m) lim=parseInt(_m[1],10)||0; }
+      if(!title && proseTitle) title=proseTitle;
       if(!['主线','支线','日常'].includes(ty)) ty='支线';
       if(title){ const t={ id:st.nextId++, type:ty, owner:((fields['对象']||fields['归属']|| (settings().bindTo&&settings().bindTo!=='宿主'?settings().bindTo:'宿主')).trim()||'宿主'), title, desc, cond, reward, penalty, limit:lim, progress:0, status:'active', turn:curTurn(), startTurn:curTurn() };
       st.tasks.push(t); st.lastTaskTurn=curTurn(); gotNew=true; pushLog(st,'新任务['+t.type+']「'+t.title+'」','·'); changed++; } }
@@ -264,7 +269,8 @@ function harvest(mesId){
   if(!base){ if(m.extra.originBase===undefined){ const _mm=ctx.chatMetadata??ctx.chat_metadata; m.extra.originBase=(_mm&&_mm[MOD])?JSON.stringify(_mm[MOD]):null; } base=m.extra.originBase; }
   if(base){ try{ (ctx.chatMetadata??ctx.chat_metadata)[MOD]=JSON.parse(base); }catch(_){}}
   const block=m.extra.originBlocks[sidx];
-  if(block && block!=='无') applyBlock(block);
+  const _pt=extractProseTitle(m.mes||text);
+  if(block && block!=='无') applyBlock(block, _pt);
   snapshot();
   renderPanel();
 }
@@ -415,6 +421,7 @@ function renderPanel(){
     h+='<div class="o-desc" style="margin:8px 0 2px">自定义人格（填了就覆盖上面）</div><textarea data-i="personaText" rows="2">'+esc(s.personaText)+'</textarea>';
     h+='<div class="o-desc" style="margin:8px 0 2px">主色</div><input data-i="accent" value="'+esc(s.accent)+'">';
     h+='<button class="o-act" data-a="reset" style="border-color:var(--o-fail);color:var(--o-fail);margin-top:10px">清空本局存档</button>';
+    h+='<div style="text-align:center;font-size:10px;color:var(--o-text3);margin-top:10px;opacity:.7">Origin '+ORIGIN_VER+'</div>';
   }
   h+='</div>';
   p.innerHTML=h;
@@ -573,5 +580,5 @@ jQuery(async ()=>{
     $('#extensions_settings').append(html);
     $('#origin_enabled').prop('checked', settings().enabled).on('change', function(){ settings().enabled=this.checked; saveS(); var r=document.getElementById('origin-root'); if(r) r.style.display=this.checked?'':'none'; });
   }catch(e){}
-  console.log('[Origin] 已加载');
+  console.log('[Origin] 已加载',ORIGIN_VER);
 });
