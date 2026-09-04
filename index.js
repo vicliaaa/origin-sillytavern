@@ -31,7 +31,7 @@ function settings(){
   const d = {
     enabled:true, judgeMode:'A', freq:3, blockWhenUnfinished:true,
     taskSource:'auto', fourthWall:0, sysName:'Origin',
-    personality:'冷澈', personaText:'', accent:'#b0684c', night:false, rewardPref:'', penaltyPref:'', bindTo:'宿主',
+    personality:'冷澈', personaText:'', accent:'#b0684c', night:false, rewardPref:'', penaltyPref:'', bindTo:'宿主', autoEcon:false,
     budget:1400, drawCost:300, limitMin:0, limitMax:0, punishEvent:true, achieveOn:true, shopRefresh:0, gachaRefresh:0, px:null, py:null, open:false,
   };
   for(const k in d){ if(s[k]===undefined) s[k]=d[k]; }
@@ -90,6 +90,7 @@ function buildInjection(){
   const active = st.tasks.filter(t=>t.status==='active');
   let out = '【'+s.sysName+' 状态】\n';
   const _host = (s.bindTo && s.bindTo!=='宿主') ? s.bindTo : '';
+  const _autoEcon = s.autoEcon || !!_host;
   if(_host) out += '★本系统绑定的是角色【'+_host+'】，不是宿主(user)。任务/积分/属性/成就都属于 '+_host+'；请让 '+_host+' 像突然获得金手指系统的主角那样思考、并主动完成系统任务。宿主(user)是旁观者或其他在场角色，系统不向 user 派任务、也不对 user 说话（除非 user 正在扮演 '+_host+'）。\n';
   out += '世界：'+(st.world||'未设定')+'\n';
   out += '积分：'+st.points+' ｜ 等级 Lv.'+st.level+'\n';
@@ -99,7 +100,8 @@ function buildInjection(){
   out += (_host?('【'+_host+'】'):'宿主(user)')+'的进行中任务：\n';
   if(_mine.length){ for(const t of _mine) out+=fmtT(t); } else out += '  （暂无）\n';
   if(_theirs.length){ out += '系统给角色布置的任务（请让对应角色在剧情里自己朝这些目标行动、推进，不需要宿主指挥）：\n'; for(const t of _theirs) out += '  【给'+t.owner+'】'+fmtT(t).replace(/^\s+/,''); }
-  if(s.mods.bag && st.bag && st.bag.length) out += '宿主背包：'+st.bag.map(b=>b.name+'×'+(b.count||1)).join('，')+'\n';
+  if(s.mods.bag && st.bag && st.bag.length) out += (_host||'宿主')+'背包：'+st.bag.map(b=>b.name+'×'+(b.count||1)).join('，')+'\n';
+  if(_autoEcon && s.mods.shop && st.shop && st.shop.length) out += '商城（可花积分买，当前积分'+st.points+'）：'+st.shop.slice(0,8).map(x=>x.name+'('+x.price+')').join(' ／ ')+'\n';
   if(st.pendingUse && st.pendingUse.length) out += '【本回合宿主动作】'+st.pendingUse.map(u=>'使用了道具「'+u.name+'」'+(u.desc?'（'+u.desc+'）':'')).join('；')+'——请让剧情与角色对此作出合理反应。\n';
   if(st.pendingEvent && st.pendingEvent.length) out += '【本回合系统事件】'+st.pendingEvent.join('；')+'——请把它自然写进正文（系统播报口吻，或让剧情直接呈现）。\n';
   if(s.mods.shop && s.shopRefresh>0 && (curTurn()-(st.lastShopTurn||-99))>=s.shopRefresh) out += '【商城可更新】本回合请在数据块用『新商品|名称|价格|说明|效果』提供 2-3 个贴合当前世界观与宿主玩法方向的新商品（可替换旧的）。\n';
@@ -124,6 +126,7 @@ function buildInjection(){
   if(s.fourthWall>0) out += '3. 第四面墙：有约 '+s.fourthWall+'% 的概率，系统可短暂打破第四面墙做一句元叙事吐槽，其余时候照常演，不要每次都破。\n';
   else out += '3. 不要打破第四面墙。\n';
   out += '4. 系统说话风格：'+persona()+'\n';
+  if(_autoEcon) out += '· '+(_host||'宿主')+'可以在剧情合理、且出于角色自己意愿时，自主使用系统：花积分从商城买东西、抽奖、用背包道具——由动机驱动，别每回合乱花、积分不够不能买。要做时在数据块报告：买|商品名 ／ 抽奖 ／ 用道具|名称。\n';
   out += '5. 若'+(_host||'宿主(user)')+'在正文里直接对系统说话或提问（如『系统，…』），系统要用上面的说话风格回应；可以解释任务、给提示、调侃、回应请求或商量；但不得替其做决定，任何积分/属性/任务的实际变动仍必须走下面的数据块。\n';
   out += '6. 奖励是对宿主有利的（加积分/加属性/加好感/给道具等）；失败惩罚才是不利的。禁止把不利内容写进奖励栏。\n';
   out += '7. 失败惩罚可以是扣积分、掉属性、失去道具、触发不利事件、或限时未达成的后果等，按剧情自由选，不必总是扣好感，也允许有的任务没有惩罚。\n';
@@ -141,7 +144,8 @@ function buildInjection(){
   out += '积分|+N或-N|理由\n';
   out += '属性|名称|+N或-N\n';
   out += '播报|一句系统口吻的话（用上面的说话风格）\n';
-  if(s.mods.bag){ out += '获得|名称|数量　（宿主在剧情里得到某个物品时）\n'; out += '用道具|名称　（宿主在剧情里用掉或消耗了背包里的某个物品时，我会把它从背包扣掉）\n'; }
+  if(s.mods.bag){ out += '获得|名称|数量　（在剧情里得到某个物品时）\n'; out += '用道具|名称　（在剧情里用掉或消耗了背包里的某个物品时，我会从背包扣掉）\n'; }
+  if(_autoEcon){ out += '买|商品名　（角色花积分从商城购买，自动进背包）\n'; if(s.mods.gacha) out += '抽奖　（角色花积分抽一次，结果自动进背包）\n'; }
   if(s.mods.ach) out += '成就|名称|一句描述（仅当剧情里真正达成了值得纪念的高光时才发，罕见，别滥发）\n';
   out += '新商品|名称|价格(整数)|说明|数值效果(可空)　（仅在收到『商城可更新』指令时才用）\n';
   if(s.mods.gacha) out += '新奖品|名称|稀有度(N/R/SR/SSR/UR)|权重(整数)|说明|数值效果(可空)　（仅在收到『奖池可更新』指令时才用，一次给全套3-5个）\n';
@@ -224,6 +228,8 @@ function applyBlock(memo){
     else if(tag==='新奖品'){ const nm=p[1]; if(nm){ _newG.push({name:nm,tier:(p[2]||'R'),weight:cleanNum(p[3])||10,desc:p[4]||'',effect:(p[5]||'')}); } }
     else if(tag==='新商品'){ const nm=p[1]; if(nm){ const it={name:nm,price:cleanNum(p[2])||300,desc:p[3]||'',effect:(p[4]||'')}; const ex=st.shop.find(x=>x.name===nm); if(ex) Object.assign(ex,it); else st.shop.push(it); if(st.shop.length>12) st.shop=st.shop.slice(-12); st.lastShopTurn=curTurn(); changed++; } }
     else if(tag==='获得'){ const nm=p[1]; if(nm){ const c=cleanNum(p[2])||1; const ex=st.bag.find(b=>b.name===nm); if(ex) ex.count=(ex.count||1)+c; else st.bag.push({name:nm,count:c,desc:p[3]||'',effect:''}); pushLog(st,'获得物品「'+nm+'」×'+c,'·'); changed++; } }
+    else if(tag==='买'||tag==='购买'){ const nm=p[1]; if(nm){ let it=st.shop.find(x=>x.name===nm); if(!it) it=st.shop.find(x=>nm.indexOf(x.name)>=0||x.name.indexOf(nm)>=0); if(it && st.points>=it.price){ st.points-=it.price; const ex=st.bag.find(b=>b.name===it.name); if(ex) ex.count=(ex.count||1)+1; else st.bag.push({name:it.name,count:1,desc:it.desc,effect:it.effect||''}); pushLog(st,'（角色）购买「'+it.name+'」(-'+it.price+')','·'); changed++; } } }
+    else if(tag==='抽奖'){ const pk=drawCore(st,false); if(pk){ st.pendingEvent=st.pendingEvent||[]; st.pendingEvent.push('抽奖抽中了'+(pk.tier?pk.tier+'级':'')+'「'+pk.name+'」'+(pk.desc?'（'+pk.desc+'）':'')+'，请把开箱那一刻写进正文'); changed++; } }
     else if(tag==='用道具'||tag==='消耗'){ const nm=p[1]; if(nm){ let b=st.bag.find(x=>x.name===nm); if(!b) b=st.bag.find(x=>nm.indexOf(x.name)>=0||x.name.indexOf(nm)>=0); if(b){ b.count=(b.count||1)-(cleanNum(p[2])||1); if(b.count<=0) st.bag.splice(st.bag.indexOf(b),1); pushLog(st,'消耗物品「'+nm+'」','·'); changed++; } } }
     else if(tag==='播报'){ pushLog(st, p.slice(1).join('｜'),'“'); changed++; }
     else if(tag==='成就'){ if(unlockAch(st,'m_'+(p[1]||''),p[1]||'成就',p[2]||'',100)) changed++; }
@@ -400,6 +406,7 @@ function renderPanel(){
     h+='<div class="o-desc" style="margin:8px 0 2px">第四面墙几率：<b data-wv>'+s.fourthWall+'</b>%</div><input type="range" min="0" max="100" step="5" value="'+s.fourthWall+'" data-i="fourthWall">';
     h+='<div class="o-desc" style="margin:8px 0 2px">单次抽奖消耗积分</div><input type="number" data-i="drawCost" value="'+s.drawCost+'">';
     h+='<div class="o-desc" style="margin:8px 0 2px">系统绑定对象（填「宿主」=给你派；填角色名=反串，系统归该角色、你旁观）</div><input data-i="bindTo" value="'+esc(s.bindTo)+'">';
+    h+='<label class="o-desc" style="display:flex;gap:6px;align-items:center;margin:6px 0"><input type="checkbox" style="width:auto;margin:0" data-i="autoEcon"'+(s.autoEcon?' checked':'')+'>允许角色自主用系统（买/抽奖/用道具·反串模式默认开）</label>';
     h+='<div class="o-desc" style="margin:8px 0 2px">系统名</div><input data-i="sysName" value="'+esc(s.sysName)+'">';
     h+='<div class="o-desc" style="margin:8px 0 2px">人格腔调</div><select data-i="personality"><option>冷澈</option><option>毒舌</option><option>傲娇</option><option>温和</option></select>';
     h+='<div class="o-desc" style="margin:8px 0 2px">自定义人格（填了就覆盖上面）</div><textarea data-i="personaText" rows="2">'+esc(s.personaText)+'</textarea>';
@@ -434,16 +441,23 @@ function bind(p){
   });
 }
 
-function drawGacha(free){
-  const st=meta(), s=settings(); if(!st) return;
-  if(!st.gachaPool || !st.gachaPool.length){ try{ toastr.warning('Origin：奖池是空的'); }catch(_){}; return; }
-  if(!free){ if(st.points < s.drawCost){ try{ toastr.warning('Origin：积分不够（需'+s.drawCost+'）'); }catch(_){}; return; } st.points-=s.drawCost; }
+function drawCore(st, free){
+  const s=settings();
+  if(!st.gachaPool || !st.gachaPool.length) return null;
+  if(!free){ if(st.points < s.drawCost) return null; st.points-=s.drawCost; }
   const tot=st.gachaPool.reduce((a,b)=>a+(b.weight||0),0); let r=Math.random()*tot, pick=st.gachaPool[0];
   for(const g of st.gachaPool){ r-=(g.weight||0); if(r<=0){ pick=g; break; } }
   const ex=st.bag.find(b=>b.name===pick.name); if(ex) ex.count=(ex.count||1)+1; else st.bag.push({name:pick.name,count:1,desc:pick.desc||'',effect:pick.effect||''});
   if(pick.tier==='SSR'||pick.tier==='UR') unlockAch(st,'lucky','欧皇附体','抽到 SSR 及以上',0);
   pushLog(st,'抽奖 → '+(pick.tier?'['+pick.tier+']':'')+pick.name+'（入背包）','★');
-  saveMeta(); renderPanel(); try{ toastr.info('Origin：抽中「'+pick.name+'」，已放入背包'); }catch(_){}
+  return pick;
+}
+function drawGacha(free){
+  const st=meta(); if(!st) return;
+  if(!st.gachaPool || !st.gachaPool.length){ try{ toastr.warning('Origin：奖池是空的'); }catch(_){}; return; }
+  if(!free && st.points < settings().drawCost){ try{ toastr.warning('Origin：积分不够（需'+settings().drawCost+'）'); }catch(_){}; return; }
+  const pick=drawCore(st, free); saveMeta(); renderPanel();
+  if(pick){ try{ toastr.info('Origin：抽中「'+pick.name+'」，已放入背包'); }catch(_){} }
 }
 function editTask(id){
   const st=meta(); if(!st) return; const t=st.tasks.find(x=>String(x.id)===String(id)); if(!t) return;
