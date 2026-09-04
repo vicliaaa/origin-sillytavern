@@ -236,24 +236,26 @@ function applyBlock(memo){
 function harvest(mesId){
   const s = settings(); if(!s.enabled) return;
   const ctx = getContext(); const chat = ctx.chat||[];
-  const m = chat[mesId] ?? chat[chat.length-1];
+  const idx = (mesId!=null && chat[mesId]) ? mesId : chat.length-1;
+  const m = chat[idx];
   if(!m || m.is_user || m.is_system) return;
+  if(!m.extra) m.extra={};
+  m.extra.originBlocks = m.extra.originBlocks || {};
+  const sidx = (typeof m.swipe_id==='number') ? m.swipe_id : 0;
   const text = m.mes || '';
   let memo=null, mm, re=new RegExp(BLK.source,'gi');
   while((mm=re.exec(text))!==null) memo=mm[1];
-  if(memo===null){ return; }
-  // 幂等：同一条消息只应用一次
-  if(!m.extra) m.extra={};
-  const sig = memo.trim();
-  if(m.extra.originSig===sig){ m.mes=text.replace(new RegExp(BLK.source,'gi'),'').trimEnd(); return; }
-  m.extra.originSig=sig;
-  m.mes = text.replace(new RegExp(BLK.source,'gi'),'').trimEnd();
-  try{ ctx.updateMessageBlock?.(mesId, m); }catch(e){}
-  const mi = (mesId!=null && chat[mesId]===m) ? mesId : chat.length-1;
+  if(memo!==null){
+    m.extra.originBlocks[sidx] = memo.trim();
+    m.mes = text.replace(new RegExp(BLK.source,'gi'),'').trimEnd();
+    try{ ctx.updateMessageBlock?.(idx, m); }catch(e){}
+  }
   let base=null;
-  for(let i=mi-1;i>=0;i--){ const pm=chat[i]; if(pm && !pm.is_user && !pm.is_system && pm.extra && pm.extra.originSnap){ base=pm.extra.originSnap; break; } }
+  for(let i=idx-1;i>=0;i--){ const pm=chat[i]; if(pm && !pm.is_user && !pm.is_system && pm.extra && pm.extra.originSnap){ base=pm.extra.originSnap; break; } }
+  if(!base){ if(m.extra.originBase===undefined){ const _mm=ctx.chatMetadata??ctx.chat_metadata; m.extra.originBase=(_mm&&_mm[MOD])?JSON.stringify(_mm[MOD]):null; } base=m.extra.originBase; }
   if(base){ try{ (ctx.chatMetadata??ctx.chat_metadata)[MOD]=JSON.parse(base); }catch(_){}}
-  if(sig!=='无') applyBlock(sig);
+  const block=m.extra.originBlocks[sidx];
+  if(block && block!=='无') applyBlock(block);
   snapshot();
   renderPanel();
 }
