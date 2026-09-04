@@ -210,7 +210,9 @@ function applyBlock(memo){
   for(const line of lines){
     const p = line.split('|').map(x=>x.trim());
     const tag = p[0];
-    if(tag==='进度'){ const t=findTask(st,p[1]); if(t){ t.progress=Math.max(0,Math.min(100,cleanNum(p[2]))); if(p[3]) pushLog(st,t.title+'：'+p[3]); if(t.status==='active' && t.progress>=100){ completeTask(st,t); } changed++; } }
+    if(tag==='进度'){ let t=findTask(st,p[1]);
+      if(!t){ const _d=(p[3]||'').replace(/^\s*(系统)?\s*(发布|派发|激活|新增)?\s*(了)?\s*(新任务|任务)?\s*[：:，,\-]*\s*/,'').trim(); if(_d && _d.length>=4 && !/^(新任务)?(发布|激活)?$/.test(_d)){ t={id:st.nextId++, type:'支线', owner:((settings().bindTo&&settings().bindTo!=='宿主')?settings().bindTo:'宿主'), title:_d.slice(0,24), desc:_d, cond:'', reward:'', penalty:'', limit:0, progress:0, status:'active', turn:curTurn(), startTurn:curTurn()}; st.tasks.push(t); st.lastTaskTurn=curTurn(); pushLog(st,'（自动补建任务）'+t.title,'·'); } }
+      if(t){ t.progress=Math.max(0,Math.min(100,cleanNum(p[2]))); if(p[3]) pushLog(st,t.title+'：'+p[3]); if(t.status==='active' && t.progress>=100){ completeTask(st,t); } changed++; } }
     else if(tag==='完成'){ const t=findTask(st,p[1]); if(t && t.status==='active'){ completeTask(st,t); changed++; } }
     else if(tag==='失败'){ const t=findTask(st,p[1]); if(t && t.status==='active'){ t.status='failed'; applyEffects(st,t.penalty,-1); pushLog(st,'任务「'+t.title+'」失败'+(t.penalty?'　'+t.penalty:''),'!'); if(settings().punishEvent){ st.pendingEvent=st.pendingEvent||[]; st.pendingEvent.push('任务「'+t.title+'」失败'+(t.penalty?'（'+t.penalty+'）':'')+'，请让剧情出现一个相称的不利后果'+(settings().penaltyPref?'（后果倾向：'+settings().penaltyPref+'）':'')); } changed++; } }
     else if(tag==='新任务'){
