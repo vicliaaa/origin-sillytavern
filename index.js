@@ -1,7 +1,7 @@
 import { extension_settings, getContext } from '../../../extensions.js';
 import { saveSettingsDebounced, eventSource, event_types } from '../../../../script.js';
 
-const ORIGIN_VER = 'v0.4 · 09-04f';
+const ORIGIN_VER = 'v0.5 · 09-04g';
 const MOD = 'origin';
 const INJ_KEY = 'origin_state';
 const DEFAULT_GACHA = [
@@ -257,11 +257,13 @@ function harvest(mesId){
   m.extra.originBlocks = m.extra.originBlocks || {};
   const sidx = (typeof m.swipe_id==='number') ? m.swipe_id : 0;
   const text = m.mes || '';
-  let memo=null, mm, re=new RegExp(BLK.source,'gi');
+  let memo=null, strip=null, mm, re=new RegExp(BLK.source,'gi');
   while((mm=re.exec(text))!==null) memo=mm[1];
+  if(memo!==null){ strip=new RegExp(BLK.source,'gi'); }
+  else { const mo=text.match(/<origin>([\s\S]*)$/i); if(mo){ memo=mo[1]; strip=/<origin>[\s\S]*$/i; } }
   if(memo!==null){
     m.extra.originBlocks[sidx] = memo.trim();
-    m.mes = text.replace(new RegExp(BLK.source,'gi'),'').trimEnd();
+    m.mes = text.replace(strip,'').trimEnd();
     try{ ctx.updateMessageBlock?.(idx, m); }catch(e){}
   }
   let base=null;
