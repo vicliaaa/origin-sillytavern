@@ -218,12 +218,12 @@ function applyBlock(memo){
       for(let i=1;i<p.length;i++){ const mm=String(p[i]||'').match(/^\s*(类型|标题|名称|描述|说明|完成条件|条件|奖励|失败惩罚|惩罚|时限|对象|归属|奖|罚)\s*[：:]\s*([\s\S]*)$/); if(mm){ fields[mm[1]]=mm[2].trim(); hasLabel=true; } }
       const g=(...ks)=>{ for(const k of ks){ if(fields[k]!=null && fields[k]!=='') return fields[k]; } return ''; };
       let ty,title,desc,cond,reward,penalty,lim;
-      if(hasLabel){ ty=g('类型'); title=g('标题','名称')||'未命名'; desc=g('描述','说明'); cond=g('完成条件','条件'); reward=g('奖励'); penalty=g('失败惩罚','惩罚','罚'); lim=cleanNum(g('时限')); }
-      else { ty=p[1]; title=p[2]||'未命名'; desc=p[3]||''; cond=p[4]||''; reward=p[5]||''; penalty=p[6]||''; lim=p[7]?cleanNum(p[7]):0; }
+      if(hasLabel){ ty=g('类型'); title=(g('标题','名称')||'').trim(); desc=g('描述','说明'); cond=g('完成条件','条件'); reward=g('奖励'); penalty=g('失败惩罚','惩罚','罚'); lim=cleanNum(g('时限')); }
+      else { ty=p[1]; title=(p[2]||'').trim(); desc=p[3]||''; cond=p[4]||''; reward=p[5]||''; penalty=p[6]||''; lim=p[7]?cleanNum(p[7]):0; }
       if(!lim){ const _m=line.match(/时限\s*[：:]?\s*(\d+)/); if(_m) lim=parseInt(_m[1],10)||0; }
       if(!['主线','支线','日常'].includes(ty)) ty='支线';
-      const t={ id:st.nextId++, type:ty, owner:((fields['对象']||fields['归属']|| (settings().bindTo&&settings().bindTo!=='宿主'?settings().bindTo:'宿主')).trim()||'宿主'), title, desc, cond, reward, penalty, limit:lim, progress:0, status:'active', turn:curTurn(), startTurn:curTurn() };
-      st.tasks.push(t); st.lastTaskTurn=curTurn(); gotNew=true; pushLog(st,'新任务['+t.type+']「'+t.title+'」','·'); changed++; }
+      if(title){ const t={ id:st.nextId++, type:ty, owner:((fields['对象']||fields['归属']|| (settings().bindTo&&settings().bindTo!=='宿主'?settings().bindTo:'宿主')).trim()||'宿主'), title, desc, cond, reward, penalty, limit:lim, progress:0, status:'active', turn:curTurn(), startTurn:curTurn() };
+      st.tasks.push(t); st.lastTaskTurn=curTurn(); gotNew=true; pushLog(st,'新任务['+t.type+']「'+t.title+'」','·'); changed++; } }
     else if(tag==='积分'){ st.points += cleanNum(p[1]); if(p[2]) pushLog(st,'积分'+p[1]+'（'+p[2]+'）'); changed++; }
     else if(tag==='属性'){ let s2=st.stats.find(x=>x.name===p[1]); if(!s2){ s2={name:p[1],val:0}; st.stats.push(s2);} s2.val+=cleanNum(p[2]); changed++; }
     else if(tag==='新奖品'){ const nm=p[1]; if(nm){ _newG.push({name:nm,tier:(p[2]||'R'),weight:cleanNum(p[3])||10,desc:p[4]||'',effect:(p[5]||'')}); } }
