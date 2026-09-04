@@ -274,7 +274,8 @@ function mountUI(){
   root.appendChild(orb); root.appendChild(panel);
   document.body.appendChild(root);
   // 位置
-  const px = s.px!=null?s.px:(window.innerWidth-74), py = s.py!=null?s.py:(window.innerHeight-74);
+  let px = s.px!=null?s.px:(window.innerWidth-74), py = s.py!=null?s.py:(window.innerHeight-74);
+  px=Math.max(4,Math.min(px, window.innerWidth-54)); py=Math.max(4,Math.min(py, window.innerHeight-54));
   orb.style.left=px+'px'; orb.style.top=py+'px';
   panel.style.left=Math.max(8,Math.min(px, window.innerWidth-342))+'px';
   panel.style.top=Math.max(8, py-380)+'px';
