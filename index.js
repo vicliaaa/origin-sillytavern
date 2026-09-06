@@ -1,7 +1,7 @@
 import { extension_settings, getContext } from '../../../extensions.js';
 import { saveSettingsDebounced, eventSource, event_types } from '../../../../script.js';
 
-const ORIGIN_VER = 'v0.5 · 09-04g';
+const ORIGIN_VER = 'v0.6 · 09-04h';
 const MOD = 'origin';
 const INJ_KEY = 'origin_state';
 const DEFAULT_GACHA = [
@@ -189,8 +189,9 @@ function applyEffects(st, str, sign){
   }
 }
 function extractProseTitle(text){ if(!text) return ''; text=String(text);
-  let m=text.match(/【[^】]{0,12}任务[^：:】]{0,8}[：:]\s*([^】\n]{2,40})】/); if(m) return m[1].trim();
-  m=text.match(/任务[一二三四五六七八九十\d]{0,3}\s*[：:]\s*([^。！？\n】]{2,40})/); if(m) return m[1].trim();
+  let m=text.match(/任务[一二三四五六七八九十\d]{1,3}\s*[：:]\s*([^。！？\n】]{2,40})/); if(m) return m[1].trim();
+  m=text.match(/【[^】]{0,10}任务[^：:】]{0,8}[：:]\s*([^】\n]{2,40})】/); if(m) return m[1].trim();
+  m=text.match(/任务\s*[：:]\s*([^。！？\n】]{2,40})/); if(m) return m[1].trim();
   return ''; }
 function pushLog(st,text,mark){ st.log.push({text, mark:mark||''}); if(st.log.length>40) st.log=st.log.slice(-40); }
 function doneCount(st){ return st.tasks.filter(t=>t.status==='done').length; }
@@ -215,7 +216,7 @@ function applyBlock(memo, proseTitle){
     const p = line.split('|').map(x=>x.trim());
     const tag = p[0];
     if(tag==='进度'){ let t=findTask(st,p[1]);
-      if(!t){ const _d=(p[3]||'').replace(/^\s*(系统)?\s*(发布|派发|激活|新增)?\s*(了)?\s*(新任务|任务)?\s*[：:，,\-]*\s*/,'').trim(); const _title=proseTitle||_d.slice(0,24); if((proseTitle || (_d && _d.length>=4 && !/^(新任务)?(发布|激活)?$/.test(_d)))){ t={id:st.nextId++, type:'支线', owner:((settings().bindTo&&settings().bindTo!=='宿主')?settings().bindTo:'宿主'), title:_title, desc:_d||_title, cond:'', reward:'', penalty:'', limit:0, progress:0, status:'active', turn:curTurn(), startTurn:curTurn()}; st.tasks.push(t); st.lastTaskTurn=curTurn(); pushLog(st,'（自动补建任务）'+t.title,'·'); } }
+      if(!t && proseTitle){ t={id:st.nextId++, type:'支线', owner:((settings().bindTo&&settings().bindTo!=='宿主')?settings().bindTo:'宿主'), title:proseTitle, desc:proseTitle, cond:'', reward:'', penalty:'', limit:0, progress:0, status:'active', turn:curTurn(), startTurn:curTurn()}; st.tasks.push(t); st.lastTaskTurn=curTurn(); pushLog(st,'（自动补建任务）'+t.title,'·'); }
       if(t){ t.progress=Math.max(0,Math.min(100,cleanNum(p[2]))); if(p[3]) pushLog(st,t.title+'：'+p[3]); if(t.status==='active' && t.progress>=100){ completeTask(st,t); } changed++; } }
     else if(tag==='完成'){ const t=findTask(st,p[1]); if(t && t.status==='active'){ completeTask(st,t); changed++; } }
     else if(tag==='失败'){ const t=findTask(st,p[1]); if(t && t.status==='active'){ t.status='failed'; applyEffects(st,t.penalty,-1); pushLog(st,'任务「'+t.title+'」失败'+(t.penalty?'　'+t.penalty:''),'!'); if(settings().punishEvent){ st.pendingEvent=st.pendingEvent||[]; st.pendingEvent.push('任务「'+t.title+'」失败'+(t.penalty?'（'+t.penalty+'）':'')+'，请让剧情出现一个相称的不利后果'+(settings().penaltyPref?'（后果倾向：'+settings().penaltyPref+'）':'')); } changed++; } }
