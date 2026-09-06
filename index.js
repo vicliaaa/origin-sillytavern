@@ -1,7 +1,7 @@
 import { extension_settings, getContext } from '../../../extensions.js';
 import { saveSettingsDebounced, eventSource, event_types } from '../../../../script.js';
 
-const ORIGIN_VER = 'v0.7 · 09-04i';
+const ORIGIN_VER = 'v0.8 · 09-04j';
 const MOD = 'origin';
 const INJ_KEY = 'origin_state';
 const DEFAULT_GACHA = [
@@ -145,7 +145,7 @@ function buildInjection(){
   out += '新任务|类型:主线或支线或日常|标题:…|描述:…|条件:…|奖励:积分300 魅力+2|惩罚:…（可空）|时限:'+(s.limitMax>0?('取 '+s.limitMin+'到'+s.limitMax+' 之间的整数，别用更小的'):'一个整数或留空')+'|对象:宿主或角色名（默认宿主，若这是系统给某角色布置的任务就写角色名）\n';
   out += '（新任务每个字段务必用「标签:值」写清楚，例如 奖励:积分300；缺的字段整段不写即可。）\n';
   out += '（★关键：正文里系统「发布/派发/给出」一个新任务时，必须用上面的『新任务|...』这一行来创建它，绝对不能用『进度|』代替。『进度|』只用于更新上面【已经列出】的现有任务。任务id只能用上面列出的数字，禁止自己编造 id、也别写「隐藏ID」。）\n';
-  out += '积分|+N或-N|理由\n';
+  out += '积分|+N或-N|理由　（正文里凡是发放或扣除积分，必须同步写这一行；面板积分以数据块为准，正文的余额要与面板一致）\n';
   out += '属性|名称|+N或-N\n';
   out += '播报|一句系统口吻的话（用上面的说话风格）\n';
   if(s.mods.bag){ out += '获得|名称|数量　（在剧情里得到某个物品时）\n'; out += '用道具|名称　（在剧情里用掉或消耗了背包里的某个物品时，我会从背包扣掉）\n'; }
@@ -196,6 +196,17 @@ function extractProseTitle(text){ if(!text) return ''; text=String(text);
   m=text.match(/【[^】]{0,10}任务[^：:】]{0,8}[：:]\s*([^】\n]{2,40})】/); if(m) return m[1].trim();
   m=text.match(/任务\s*[：:]\s*([^。！？\n】]{2,40})/); if(m) return m[1].trim();
   return ''; }
+function syncPointsFromProse(st, prose, blockHadPoints){
+  if(!prose) return false; prose=String(prose);
+  let m=prose.match(/积分余额\s*[：:]?\s*(\d{1,7})/);
+  if(m){ const v=parseInt(m[1],10); if(!isNaN(v) && v!==st.points){ st.points=v; pushLog(st,'积分同步为 '+v+'（按正文余额）','·'); return true; } return false; }
+  if(blockHadPoints) return false;
+  let ch=false;
+  for(const r of prose.matchAll(/积分\s*[：:]?\s*(\d{1,6})\s*已发放/g)){ st.points+=parseInt(r[1],10); ch=true; }
+  for(const c of prose.matchAll(/扣除积分\s*[：:]?\s*(\d{1,6})/g)){ st.points-=parseInt(c[1],10); ch=true; }
+  if(ch) pushLog(st,'积分按正文补记，现为 '+st.points,'·');
+  return ch;
+}
 function pushLog(st,text,mark){ st.log.push({text, mark:mark||''}); if(st.log.length>40) st.log=st.log.slice(-40); }
 function doneCount(st){ return st.tasks.filter(t=>t.status==='done').length; }
 function hasAch(st,id){ return (st.achievements||[]).some(a=>a.id===id); }
@@ -277,6 +288,7 @@ function harvest(mesId){
   const block=m.extra.originBlocks[sidx];
   const _pt=extractProseTitle(m.mes||text);
   if(block && block!=='无') applyBlock(block, _pt);
+  try{ const _st=meta(); if(_st){ const _had=!!(block && /积分\|/.test(block)); if(syncPointsFromProse(_st, m.mes||'', _had)) saveMeta(); } }catch(_){}
   snapshot();
   renderPanel();
 }
