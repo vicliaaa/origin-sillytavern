@@ -1,7 +1,7 @@
 import { extension_settings, getContext } from '../../../extensions.js';
 import { saveSettingsDebounced, eventSource, event_types } from '../../../../script.js';
 
-const ORIGIN_VER = 'v0.8 · 09-04j';
+const ORIGIN_VER = 'v0.9 · 09-04k';
 const MOD = 'origin';
 const INJ_KEY = 'origin_state';
 const DEFAULT_GACHA = [
@@ -196,6 +196,17 @@ function extractProseTitle(text){ if(!text) return ''; text=String(text);
   m=text.match(/【[^】]{0,10}任务[^：:】]{0,8}[：:]\s*([^】\n]{2,40})】/); if(m) return m[1].trim();
   m=text.match(/任务\s*[：:]\s*([^。！？\n】]{2,40})/); if(m) return m[1].trim();
   return ''; }
+function proseNewTasks(prose){ const out=[]; if(!prose) return out; prose=String(prose);
+  for(const m of prose.matchAll(/(主线|支线|日常)?\s*任务\s*阶段\s*([一二三四五六七八九十百零\d]+)\s*已?生成/g)){
+    const type=m[1]||'主线', stage=m[2], title=type+'任务·阶段'+stage;
+    const after=prose.slice(m.index+m[0].length, m.index+m[0].length+400);
+    const d=after.match(/(?:任务要求|要求|需要|目标)[：:]?\s*([^。\n]{4,80})/);
+    out.push({type,title,desc:d?d[1].trim():'',stage});
+  }
+  return out; }
+function proseCompletions(prose){ const out=[]; if(!prose) return out; prose=String(prose);
+  for(const m of prose.matchAll(/阶段\s*([一二三四五六七八九十百零\d]+)\s*(?:已达成|已完成)/g)) out.push(m[1]);
+  return out; }
 function syncPointsFromProse(st, prose, blockHadPoints){
   if(!prose) return false; prose=String(prose);
   let m=prose.match(/积分余额\s*[：:]?\s*(\d{1,7})/);
@@ -289,6 +300,10 @@ function harvest(mesId){
   const _pt=extractProseTitle(m.mes||text);
   if(block && block!=='无') applyBlock(block, _pt);
   try{ const _st=meta(); if(_st){ const _had=!!(block && /积分\|/.test(block)); if(syncPointsFromProse(_st, m.mes||'', _had)) saveMeta(); } }catch(_){}
+  try{ const _s2=meta(); if(_s2){ const _hasNew=!!(block && /新任务\|/.test(block)); let _chg=false;
+    if(!_hasNew){ for(const nt of proseNewTasks(m.mes||'')){ if(_s2.tasks.some(t=>t.title===nt.title)) continue; for(const t of _s2.tasks){ if(t.status==='active' && /阶段/.test(t.title)) completeTask(_s2,t); } const t={id:_s2.nextId++, type:nt.type, owner:((settings().bindTo&&settings().bindTo!=='宿主')?settings().bindTo:'宿主'), title:nt.title, desc:nt.desc||nt.title, cond:nt.desc||'', reward:'', penalty:'', limit:0, progress:0, status:'active', turn:curTurn(), startTurn:curTurn()}; _s2.tasks.push(t); _s2.lastTaskTurn=curTurn(); pushLog(_s2,'（按正文建任务）'+t.title,'·'); _chg=true; } }
+    for(const sg of proseCompletions(m.mes||'')){ const t=_s2.tasks.find(x=>x.status==='active' && x.title.indexOf('阶段'+sg)>=0); if(t){ completeTask(_s2,t); _chg=true; } }
+    if(_chg) saveMeta(); } }catch(_){}
   snapshot();
   renderPanel();
 }
