@@ -1,7 +1,7 @@
 import { extension_settings, getContext } from '../../../extensions.js';
 import { saveSettingsDebounced, eventSource, event_types } from '../../../../script.js';
 
-const ORIGIN_VER = 'v0.6 · 09-04h';
+const ORIGIN_VER = 'v0.7 · 09-04i';
 const MOD = 'origin';
 const INJ_KEY = 'origin_state';
 const DEFAULT_GACHA = [
@@ -32,7 +32,7 @@ function settings(){
   const d = {
     enabled:true, judgeMode:'A', freq:3, blockWhenUnfinished:true,
     taskSource:'auto', fourthWall:0, sysName:'Origin',
-    personality:'冷澈', personaText:'', accent:'#b0684c', night:false, rewardPref:'', penaltyPref:'', bindTo:'宿主', autoEcon:false,
+    personality:'冷澈', personaText:'', accent:'#b0684c', night:false, rewardPref:'', penaltyPref:'', bindTo:'宿主', autoEcon:false, keepAll:true,
     budget:1400, drawCost:300, limitMin:0, limitMax:0, punishEvent:true, achieveOn:true, shopRefresh:0, gachaRefresh:0, px:null, py:null, open:false,
   };
   for(const k in d){ if(s[k]===undefined) s[k]=d[k]; }
@@ -73,7 +73,10 @@ function persona(){ const s=settings(); return (s.personaText&&s.personaText.tri
 
 function curTurn(){ try{ const chat=getContext().chat||[]; let n=0; for(const m of chat){ if(m && !m.is_user && !m.is_system) n++; } return n; }catch(e){ return 0; } }
 function lastAiMsg(){ const chat=getContext().chat||[]; for(let i=chat.length-1;i>=0;i--){ const m=chat[i]; if(m && !m.is_user && !m.is_system) return {m,i}; } return null; }
-function snapshot(){ try{ const ctx=getContext(); const mm=ctx.chatMetadata??ctx.chat_metadata; if(!mm||!mm[MOD]) return; const la=lastAiMsg(); if(!la) return; if(!la.m.extra) la.m.extra={}; la.m.extra.originSnap=JSON.stringify(mm[MOD]); if(ctx.saveChat) ctx.saveChat(); }catch(_){}}
+let _saveChatTimer=0;
+function scheduleSaveChat(){ if(_saveChatTimer) clearTimeout(_saveChatTimer); _saveChatTimer=setTimeout(function(){ _saveChatTimer=0; try{ const c=getContext(); if(c.saveChat) c.saveChat(); }catch(_){}}, 1200); }
+function pruneSnaps(){ try{ const chat=getContext().chat||[]; let seen=0; for(let i=chat.length-1;i>=0;i--){ const m=chat[i]; if(m && !m.is_user && !m.is_system){ seen++; if(seen>15 && m.extra){ delete m.extra.originSnap; delete m.extra.originBlocks; delete m.extra.originBase; } } } }catch(_){}}
+function snapshot(){ try{ const ctx=getContext(); const mm=ctx.chatMetadata??ctx.chat_metadata; if(!mm||!mm[MOD]) return; const la=lastAiMsg(); if(!la) return; if(!la.m.extra) la.m.extra={}; la.m.extra.originSnap=JSON.stringify(mm[MOD]); if(settings().keepAll===false){ pruneSnaps(); scheduleSaveChat(); } else { if(ctx.saveChat) ctx.saveChat(); } }catch(_){}}
 function restoreFromChat(){ try{ const ctx=getContext(); const mm=ctx.chatMetadata??ctx.chat_metadata; if(!mm) return; const la=lastAiMsg(); if(la && la.m.extra && la.m.extra.originSnap){ mm[MOD]=JSON.parse(la.m.extra.originSnap); } }catch(_){}}
 function tRemain(t){ if(!t.limit || t.limit<=0) return null; const elapsed=curTurn()-(t.startTurn||t.turn||curTurn()); return t.limit - elapsed; }
 function checkExpiry(){ const st=meta(); if(!st) return; let ch=false; for(const t of st.tasks){ if(t.status==='active'){ const r=tRemain(t); if(r!==null && r<=0){ t.status='failed'; applyEffects(st,t.penalty,-1); pushLog(st,'任务「'+t.title+'」超时失败'+(t.penalty?'　'+t.penalty:''),'!'); if(settings().punishEvent){ st.pendingEvent=st.pendingEvent||[]; st.pendingEvent.push('任务「'+t.title+'」超时失败'+(t.penalty?'（'+t.penalty+'）':'')+'，请让剧情出现一个相称的不利后果'+(settings().penaltyPref?'（后果倾向：'+settings().penaltyPref+'）':'')); } ch=true; } } } if(ch) saveMeta(); }
@@ -423,6 +426,7 @@ function renderPanel(){
     h+='<div class="o-desc" style="margin:8px 0 2px">人格腔调</div><select data-i="personality"><option>冷澈</option><option>毒舌</option><option>傲娇</option><option>温和</option></select>';
     h+='<div class="o-desc" style="margin:8px 0 2px">自定义人格（填了就覆盖上面）</div><textarea data-i="personaText" rows="2">'+esc(s.personaText)+'</textarea>';
     h+='<div class="o-desc" style="margin:8px 0 2px">主色</div><input data-i="accent" value="'+esc(s.accent)+'">';
+    h+='<label class="o-desc" style="display:flex;gap:6px;align-items:center;margin:10px 0 2px"><input type="checkbox" style="width:auto;margin:0" data-i="keepAll"'+(s.keepAll!==false?' checked':'')+'>保留全部历史快照（关掉更省电、文件更小；分叉只能回退最近15楼）</label>';
     h+='<button class="o-act" data-a="reset" style="border-color:var(--o-fail);color:var(--o-fail);margin-top:10px">清空本局存档</button>';
     h+='<div style="text-align:center;font-size:10px;color:var(--o-text3);margin-top:10px;opacity:.7">Origin '+ORIGIN_VER+'</div>';
   }
