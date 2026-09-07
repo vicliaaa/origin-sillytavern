@@ -1,7 +1,7 @@
 import { extension_settings, getContext } from '../../../extensions.js';
 import { saveSettingsDebounced, eventSource, event_types } from '../../../../script.js';
 
-const ORIGIN_VER = 'v1.0 · 09-07';
+const ORIGIN_VER = 'v1.0.1 · 09-07';
 const MOD = 'origin';
 const INJ_KEY = 'origin_state';
 const DEFAULT_GACHA = [
@@ -114,7 +114,7 @@ function buildInjection(){
   if(s.mods.gacha && s.gachaRefresh>0 && (curTurn()-(st.lastGachaTurn||-99))>=s.gachaRefresh) out += '【奖池可更新】本回合请在数据块用『新奖品|名称|稀有度|权重|说明|效果』给出 3-5 个贴合当前世界观与宿主玩法方向的奖品，整套替换奖池。\n';
 
   out += '\n【本回合规则】\n';
-  out += '0. 【填表前逐条核对·不可省略】写完正文后，先把上面列出的每一个进行中任务过一遍：这回合正文里有没有与它相关的事？然后在数据块里为【每一个】进行中任务各写一行『进度|id|百分比|依据』——有进展就更新百分比并写依据；没进展也要写，百分比照旧、依据写『本回合无进展』。一个任务都不能漏，本回合正文里出现的积分变动、获得物品、系统发布的新任务也都必须落到对应的行里。数据块每回合必须存在。\n';
+  out += '0. 【填表前逐条核对·不可省略】写完正文后，先把上面列出的每一个进行中任务过一遍：这回合正文里有没有与它相关的事？然后在数据块里为【每一个】进行中任务各写一行『进度|id|百分比|依据』——有进展就更新百分比并写依据；没进展也要写，百分比照旧、依据写『本回合无进展』。一个任务都不能漏，本回合正文里出现的积分变动、获得物品、系统发布的新任务也都必须落到对应的行里。<origin> 数据块每回合必须存在（就叫 origin，别起别的名）。\n';
   out += '1. 依据本回合正文里实际发生的事，更新上面任务的进度或判定完成/失败；据实判定，没发生的进展不要写，禁止替宿主(user)自动完成任务。当某个进行中任务的完成条件在本回合剧情里达成了，必须输出一行『完成|任务id』（用上面列出的数字id），不要漏、不要只在嘴上说完成了。任务可以在被发布的同一回合就完成——只要本回合剧情已达成条件，就立刻报完成、进度直接给到100，禁止为了拉长节奏而故意压低进度或把已完成的任务拖到以后。\n'; if(_host) out += '（系统绑定于 '+_host+'：请让 '+_host+' 主动推进并完成自己的系统任务，这是主角在用金手指，不算替宿主完成。）\n';
   const allow = allowNewTask(st);
   if(s.taskSource==='manual'){
@@ -159,6 +159,7 @@ function buildInjection(){
   out += '新商品|名称|价格(整数)|说明|数值效果(可空)　（仅在收到『商城可更新』指令时才用）\n';
   if(s.mods.gacha) out += '新奖品|名称|稀有度(N/R/SR/SSR/UR)|权重(整数)|说明|数值效果(可空)　（仅在收到『奖池可更新』指令时才用，一次给全套3-5个）\n';
   out += '</origin>\n';
+  out += '（标签必须原样写 <origin> 与 </origin>，不许改成「数据板」「数据块」或别的名字；块里不要加「系统：……」之类的小标题、不要加项目符号，每一行只能是上面列出的某一种格式，第一个字段必须是 进度／完成／新任务 这类标签名。）\n';
   out += '规则：任务id用上面列出的数字；没有对应内容就不写该行；完全无变化则输出 <origin>无</origin>。新任务的各字段请用「标签:值」写（如 奖励:积分300、时限:8）；描述与条件里不得出现竖线 |。\n';
 
   if(out.length > s.budget){ const cut = out.lastIndexOf('\n', s.budget); out = out.slice(0, cut>0?cut:s.budget); }
@@ -180,7 +181,9 @@ function onPromptReady(ev){
 }
 
 // ---------- 判定收块（模式A：解析AI回复里的 <origin> 块） ----------
-const BLK = /<origin>([\s\S]*?)<\/origin>\s*/gi;
+const BLK_TAG = '(?:origin[^>]*|数据[板块]|系统数据[板块]?|origin\\s*数据[板块])';
+const BLK = new RegExp('<'+BLK_TAG+'>([\\s\\S]*?)<\\/'+BLK_TAG+'>\\s*','gi');
+const BLK_OPEN = new RegExp('<'+BLK_TAG+'>([\\s\\S]*)$','i');
 function cleanNum(x){ const n = parseInt(String(x).replace(/[^0-9-]/g,''),10); return isNaN(n)?0:n; }
 function findTask(st,idOrTitle){ const d=String(idOrTitle==null?'':idOrTitle).replace(/[^0-9]/g,''); if(d!==''){ const t=st.tasks.find(x=>String(x.id)===d); if(t) return t; } const q=String(idOrTitle==null?'':idOrTitle).trim(); if(!q) return undefined; return st.tasks.find(x=>x.status==='active' && (x.title===q || q.indexOf(x.title)>=0 || (x.title&&x.title.indexOf(q)>=0))); }
 function applyEffects(st, str, sign){
@@ -240,10 +243,11 @@ function completeTask(st,t){ if(!t||t.status!=='active') return; t.status='done'
 function applyBlock(memo, proseTitle){
   const st = meta(); if(!st) return;
   st.lastRaw = memo; proseTitle=proseTitle||'';
-  const lines = memo.split('\n').map(l=>l.trim()).filter(l=>l && l!=='无');
+  const lines = memo.split('\n').map(l=>l.trim().replace(/^[-•·*＊]\s*|^\d+[.、)）]\s*/,'')).filter(l=>l && l!=='无' && !(/^系统\s*[：:]/.test(l) && l.indexOf('|')<0));
   let changed = 0, gotNew=false, _newG=[];
   for(const line of lines){
     const p = line.split('|').map(x=>x.trim());
+    if(p.length>=3 && !/^(进度|完成|失败|新任务|积分|属性|播报|获得|用道具|消耗|买|购买|抽奖|成就|新商品|新奖品|私聊|时限)/.test(p[0]) && /^\d+$/.test(p[1]) && /^\d{1,3}\s*%?$/.test(p[2])){ const _tt=p[0]; p.splice(0,1,'进度'); if(!findTask(st,p[1])) p[1]=_tt; }
     const tag = p[0];
     if(tag==='进度'){ let t=findTask(st,p[1]);
       if(!t && proseTitle){ t={id:st.nextId++, type:'支线', owner:((settings().bindTo&&settings().bindTo!=='宿主')?settings().bindTo:'宿主'), title:proseTitle, desc:proseTitle, cond:'', reward:'', penalty:'', limit:0, progress:0, status:'active', turn:curTurn(), startTurn:curTurn()}; st.tasks.push(t); st.lastTaskTurn=curTurn(); pushLog(st,'（自动补建任务）'+t.title,'·'); }
@@ -293,10 +297,11 @@ function harvest(mesId){
   let memo=null, strip=null, mm, re=new RegExp(BLK.source,'gi');
   while((mm=re.exec(text))!==null) memo=mm[1];
   if(memo!==null){ strip=new RegExp(BLK.source,'gi'); }
-  else { const mo=text.match(/<origin>([\s\S]*)$/i); if(mo){ memo=mo[1]; strip=/<origin>[\s\S]*$/i; } }
+  else { const mo=text.match(BLK_OPEN); if(mo){ memo=mo[1]; strip=BLK_OPEN; } }
   if(memo!==null){
     m.extra.originBlocks[sidx] = memo.trim();
     m.mes = text.replace(strip,'').trimEnd();
+    try{ if(Array.isArray(m.swipes) && m.swipes[sidx]!=null) m.swipes[sidx]=m.mes; }catch(_){}
     try{ ctx.updateMessageBlock?.(idx, m); }catch(e){}
   }
   let base=null;
