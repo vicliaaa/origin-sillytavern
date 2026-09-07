@@ -1,7 +1,7 @@
 import { extension_settings, getContext } from '../../../extensions.js';
 import { saveSettingsDebounced, eventSource, event_types } from '../../../../script.js';
 
-const ORIGIN_VER = 'v0.9 · 09-04k';
+const ORIGIN_VER = 'v0.9.1 · 09-07';
 const MOD = 'origin';
 const INJ_KEY = 'origin_state';
 const DEFAULT_GACHA = [
@@ -111,6 +111,7 @@ function buildInjection(){
   if(s.mods.gacha && s.gachaRefresh>0 && (curTurn()-(st.lastGachaTurn||-99))>=s.gachaRefresh) out += '【奖池可更新】本回合请在数据块用『新奖品|名称|稀有度|权重|说明|效果』给出 3-5 个贴合当前世界观与宿主玩法方向的奖品，整套替换奖池。\n';
 
   out += '\n【本回合规则】\n';
+  out += '0. 【填表前逐条核对·不可省略】写完正文后，先把上面列出的每一个进行中任务过一遍：这回合正文里有没有与它相关的事？然后在数据块里为【每一个】进行中任务各写一行『进度|id|百分比|依据』——有进展就更新百分比并写依据；没进展也要写，百分比照旧、依据写『本回合无进展』。一个任务都不能漏，本回合正文里出现的积分变动、获得物品、系统发布的新任务也都必须落到对应的行里。数据块每回合必须存在。\n';
   out += '1. 依据本回合正文里实际发生的事，更新上面任务的进度或判定完成/失败；据实判定，没发生的进展不要写，禁止替宿主(user)自动完成任务。当某个进行中任务的完成条件在本回合剧情里达成了，必须输出一行『完成|任务id』（用上面列出的数字id），不要漏、不要只在嘴上说完成了。任务可以在被发布的同一回合就完成——只要本回合剧情已达成条件，就立刻报完成、进度直接给到100，禁止为了拉长节奏而故意压低进度或把已完成的任务拖到以后。\n'; if(_host) out += '（系统绑定于 '+_host+'：请让 '+_host+' 主动推进并完成自己的系统任务，这是主角在用金手指，不算替宿主完成。）\n';
   const allow = allowNewTask(st);
   if(s.taskSource==='manual'){
@@ -242,7 +243,7 @@ function applyBlock(memo, proseTitle){
     const tag = p[0];
     if(tag==='进度'){ let t=findTask(st,p[1]);
       if(!t && proseTitle){ t={id:st.nextId++, type:'支线', owner:((settings().bindTo&&settings().bindTo!=='宿主')?settings().bindTo:'宿主'), title:proseTitle, desc:proseTitle, cond:'', reward:'', penalty:'', limit:0, progress:0, status:'active', turn:curTurn(), startTurn:curTurn()}; st.tasks.push(t); st.lastTaskTurn=curTurn(); pushLog(st,'（自动补建任务）'+t.title,'·'); }
-      if(t){ t.progress=Math.max(0,Math.min(100,cleanNum(p[2]))); if(p[3]) pushLog(st,t.title+'：'+p[3]); if(t.status==='active' && t.progress>=100){ completeTask(st,t); } changed++; } }
+      if(t){ const _np=Math.max(0,Math.min(100,cleanNum(p[2]))); const _same=(_np===t.progress); t.progress=_np; if(p[3] && !(_same && /无进展|无变化|没有进展/.test(p[3]))) pushLog(st,t.title+'：'+p[3]); if(t.status==='active' && t.progress>=100){ completeTask(st,t); } changed++; } }
     else if(tag==='完成'){ const t=findTask(st,p[1]); if(t && t.status==='active'){ completeTask(st,t); changed++; } }
     else if(tag==='失败'){ const t=findTask(st,p[1]); if(t && t.status==='active'){ t.status='failed'; applyEffects(st,t.penalty,-1); pushLog(st,'任务「'+t.title+'」失败'+(t.penalty?'　'+t.penalty:''),'!'); if(settings().punishEvent){ st.pendingEvent=st.pendingEvent||[]; st.pendingEvent.push('任务「'+t.title+'」失败'+(t.penalty?'（'+t.penalty+'）':'')+'，请让剧情出现一个相称的不利后果'+(settings().penaltyPref?'（后果倾向：'+settings().penaltyPref+'）':'')); } changed++; } }
     else if(tag==='新任务'){
