@@ -1,7 +1,7 @@
 import { extension_settings, getContext } from '../../../extensions.js';
 import { saveSettingsDebounced, eventSource, event_types } from '../../../../script.js';
 
-const ORIGIN_VER = 'v0.9.1 · 09-07';
+const ORIGIN_VER = 'v1.0 · 09-07';
 const MOD = 'origin';
 const INJ_KEY = 'origin_state';
 const DEFAULT_GACHA = [
@@ -34,10 +34,11 @@ function settings(){
     taskSource:'auto', fourthWall:0, sysName:'Origin',
     personality:'冷澈', personaText:'', accent:'#b0684c', night:false, rewardPref:'', penaltyPref:'', bindTo:'宿主', autoEcon:false, keepAll:true,
     budget:1400, drawCost:300, limitMin:0, limitMax:0, punishEvent:true, achieveOn:true, shopRefresh:0, gachaRefresh:0, px:null, py:null, open:false,
+    chatMode:'follow', apiUrl:'', apiKey:'', apiModel:'', chatToStory:true, rpChat:'auto',
   };
   for(const k in d){ if(s[k]===undefined) s[k]=d[k]; }
   if(!s.mods) s.mods={};
-  for(const mk of ['stat','bag','shop','gacha','ach']) if(s.mods[mk]===undefined) s.mods[mk]=true;
+  for(const mk of ['stat','bag','shop','gacha','ach','chat']) if(s.mods[mk]===undefined) s.mods[mk]=true;
   return s;
 }
 function saveS(){ saveSettingsDebounced(); }
@@ -58,6 +59,7 @@ function meta(){
   if(!o.shop) o.shop=DEFAULT_SHOP.map(x=>Object.assign({},x));
   if(!o.gachaPool) o.gachaPool=DEFAULT_GACHA.map(x=>Object.assign({},x));
   if(!o.pendingEvent) o.pendingEvent=[];
+  if(!o.chat) o.chat=[];
   if(!o.achievements) o.achievements=[]; else { const _s={}; o.achievements=o.achievements.filter(a=>{ if(_s[a.name]) return false; _s[a.name]=1; return true; }); }
   if(o.lastShopTurn===undefined) o.lastShopTurn=-99;
   if(o.lastGachaTurn===undefined) o.lastGachaTurn=-99;
@@ -79,7 +81,7 @@ function pruneSnaps(){ try{ const chat=getContext().chat||[]; let seen=0; for(le
 function snapshot(){ try{ const ctx=getContext(); const mm=ctx.chatMetadata??ctx.chat_metadata; if(!mm||!mm[MOD]) return; const la=lastAiMsg(); if(!la) return; if(!la.m.extra) la.m.extra={}; la.m.extra.originSnap=JSON.stringify(mm[MOD]); if(settings().keepAll===false){ pruneSnaps(); scheduleSaveChat(); } else { if(ctx.saveChat) ctx.saveChat(); } }catch(_){}}
 function restoreFromChat(){ try{ const ctx=getContext(); const mm=ctx.chatMetadata??ctx.chat_metadata; if(!mm) return; const la=lastAiMsg(); if(la && la.m.extra && la.m.extra.originSnap){ mm[MOD]=JSON.parse(la.m.extra.originSnap); } }catch(_){}}
 function tRemain(t){ if(!t.limit || t.limit<=0) return null; const elapsed=curTurn()-(t.startTurn||t.turn||curTurn()); return t.limit - elapsed; }
-function checkExpiry(){ const st=meta(); if(!st) return; let ch=false; for(const t of st.tasks){ if(t.status==='active'){ const r=tRemain(t); if(r!==null && r<=0){ t.status='failed'; applyEffects(st,t.penalty,-1); pushLog(st,'任务「'+t.title+'」超时失败'+(t.penalty?'　'+t.penalty:''),'!'); if(settings().punishEvent){ st.pendingEvent=st.pendingEvent||[]; st.pendingEvent.push('任务「'+t.title+'」超时失败'+(t.penalty?'（'+t.penalty+'）':'')+'，请让剧情出现一个相称的不利后果'+(settings().penaltyPref?'（后果倾向：'+settings().penaltyPref+'）':'')); } ch=true; } } } if(ch) saveMeta(); }
+function checkExpiry(){ const st=meta(); if(!st||st.paused) return; let ch=false; for(const t of st.tasks){ if(t.status==='active'){ const r=tRemain(t); if(r!==null && r<=0){ t.status='failed'; applyEffects(st,t.penalty,-1); pushLog(st,'任务「'+t.title+'」超时失败'+(t.penalty?'　'+t.penalty:''),'!'); if(settings().punishEvent){ st.pendingEvent=st.pendingEvent||[]; st.pendingEvent.push('任务「'+t.title+'」超时失败'+(t.penalty?'（'+t.penalty+'）':'')+'，请让剧情出现一个相称的不利后果'+(settings().penaltyPref?'（后果倾向：'+settings().penaltyPref+'）':'')); } ch=true; } } } if(ch) saveMeta(); }
 function allowNewTask(st){
   const s = settings();
   if(curTurn() - st.lastTaskTurn < s.freq) return false;
@@ -89,6 +91,7 @@ function allowNewTask(st){
 
 function buildInjection(){
   const s = settings(); const st = meta(); if(!st) return '';
+  if(st.paused) return '';
   checkExpiry(); checkAchievements();
   const active = st.tasks.filter(t=>t.status==='active');
   let out = '【'+s.sysName+' 状态】\n';
@@ -149,6 +152,7 @@ function buildInjection(){
   out += '积分|+N或-N|理由　（正文里凡是发放或扣除积分，必须同步写这一行；面板积分以数据块为准，正文的余额要与面板一致）\n';
   out += '属性|名称|+N或-N\n';
   out += '播报|一句系统口吻的话（用上面的说话风格）\n';
+  if(_host && s.mods.chat!==false && s.rpChat!=='manual') out += '私聊|系统 或 '+_host+'|一句话　（这回合 '+_host+' 和系统私下说的话，只有他听得见、不进正文；2-4行、一行一句、两边交替；这回合没说就不写）\n';
   if(s.mods.bag){ out += '获得|名称|数量　（在剧情里得到某个物品时）\n'; out += '用道具|名称　（在剧情里用掉或消耗了背包里的某个物品时，我会从背包扣掉）\n'; }
   if(_autoEcon){ out += '买|商品名　（角色花积分从商城购买，自动进背包）\n'; if(s.mods.gacha) out += '抽奖　（角色花积分抽一次，结果自动进背包）\n'; }
   if(s.mods.ach) out += '成就|名称|一句描述（仅当剧情里真正达成了值得纪念的高光时才发，罕见，别滥发）\n';
@@ -267,6 +271,8 @@ function applyBlock(memo, proseTitle){
     else if(tag==='抽奖'){ const pk=drawCore(st,false); if(pk){ st.pendingEvent=st.pendingEvent||[]; st.pendingEvent.push('抽奖抽中了'+(pk.tier?pk.tier+'级':'')+'「'+pk.name+'」'+(pk.desc?'（'+pk.desc+'）':'')+'，请把开箱那一刻写进正文'); changed++; } }
     else if(tag==='用道具'||tag==='消耗'){ const nm=p[1]; if(nm){ let b=st.bag.find(x=>x.name===nm); if(!b) b=st.bag.find(x=>nm.indexOf(x.name)>=0||x.name.indexOf(nm)>=0); if(b){ b.count=(b.count||1)-(cleanNum(p[2])||1); if(b.count<=0) st.bag.splice(st.bag.indexOf(b),1); pushLog(st,'消耗物品「'+nm+'」','·'); changed++; } } }
     else if(tag==='播报'){ pushLog(st, p.slice(1).join('｜'),'“'); changed++; }
+    else if(tag==='私聊'){ const who=String(p[1]||'').trim(); const txt=p.slice(2).join('|').trim(); if(txt){ st.chat=st.chat||[]; st.chat.push({who:/系统/.test(who)?'sys':'char', name:who, text:txt, turn:curTurn()}); if(st.chat.length>80) st.chat=st.chat.slice(-80); changed++; } }
+    else if(tag==='时限'){ const t=findTask(st,p[1]); const n=cleanNum(p[2]); if(t && t.status==='active' && n>0){ t.limit=n; t.startTurn=curTurn(); pushLog(st,t.title+'：时限改为 '+n+' 回合','·'); changed++; } }
     else if(tag==='成就'){ if(unlockAch(st,'m_'+(p[1]||''),p[1]||'成就',p[2]||'',100)) changed++; }
   }
   if(_newG.length){ st.gachaPool=_newG; st.lastGachaTurn=curTurn(); changed++; }
@@ -299,9 +305,10 @@ function harvest(mesId){
   if(base){ try{ (ctx.chatMetadata??ctx.chat_metadata)[MOD]=JSON.parse(base); }catch(_){}}
   const block=m.extra.originBlocks[sidx];
   const _pt=extractProseTitle(m.mes||text);
-  if(block && block!=='无') applyBlock(block, _pt);
-  try{ const _st=meta(); if(_st){ const _had=!!(block && /积分\|/.test(block)); if(syncPointsFromProse(_st, m.mes||'', _had)) saveMeta(); } }catch(_){}
-  try{ const _s2=meta(); if(_s2){ const _hasNew=!!(block && /新任务\|/.test(block)); let _chg=false;
+  const _paused=!!(meta()&&meta().paused);
+  if(!_paused && block && block!=='无') applyBlock(block, _pt);
+  try{ const _st=meta(); if(_st && !_paused){ const _had=!!(block && /积分\|/.test(block)); if(syncPointsFromProse(_st, m.mes||'', _had)) saveMeta(); } }catch(_){}
+  try{ const _s2=meta(); if(_s2 && !_paused){ const _hasNew=!!(block && /新任务\|/.test(block)); let _chg=false;
     if(!_hasNew){ for(const nt of proseNewTasks(m.mes||'')){ if(_s2.tasks.some(t=>t.title===nt.title)) continue; for(const t of _s2.tasks){ if(t.status==='active' && /阶段/.test(t.title)) completeTask(_s2,t); } const t={id:_s2.nextId++, type:nt.type, owner:((settings().bindTo&&settings().bindTo!=='宿主')?settings().bindTo:'宿主'), title:nt.title, desc:nt.desc||nt.title, cond:nt.desc||'', reward:'', penalty:'', limit:0, progress:0, status:'active', turn:curTurn(), startTurn:curTurn()}; _s2.tasks.push(t); _s2.lastTaskTurn=curTurn(); pushLog(_s2,'（按正文建任务）'+t.title,'·'); _chg=true; } }
     for(const sg of proseCompletions(m.mes||'')){ const t=_s2.tasks.find(x=>x.status==='active' && x.title.indexOf('阶段'+sg)>=0); if(t){ completeTask(_s2,t); _chg=true; } }
     if(_chg) saveMeta(); } }catch(_){}
@@ -370,15 +377,18 @@ function renderPanel(){
   if(!st){ p.innerHTML='<div class="o-head"><div class="o-ring2"><i></i></div><div class="o-name">'+esc(s.sysName)+'</div><span style="flex:1"></span><span class="o-hbtn" data-a="close">－</span></div><div class="o-empty">先打开一个聊天。</div>'; bind(p); return; }
   let h='';
   h+='<div class="o-head" data-drag="1"><div class="o-ring2"><i></i></div><div class="o-name">'+esc(s.sysName)+'</div><span style="flex:1"></span>';
+  h+='<span class="o-hbtn" data-a="pause" title="'+(st.paused?'恢复系统':'暂停任务（系统退出剧情，时限冻结）')+'">'+(st.paused?'▶':'❚❚')+'</span>';
   h+='<span class="o-hbtn" data-a="night" title="日夜">'+(s.night?'☀':'☾')+'</span>';
   h+='<span class="o-hbtn" data-a="set" title="设置">⚙</span>';
   h+='<span class="o-hbtn" data-a="close" title="收起">－</span></div>';
   h+='<div class="o-persona">'+esc(persona())+'</div>';
   h+='<div class="o-meta"><span class="pt">积分 <b>'+st.points+'</b></span><span class="lv">Lv.'+st.level+'</span><span class="o-bar"><i style="width:'+Math.round(st.exp/st.expMax*100)+'%"></i></span></div>';
   h+='<div class="o-world">当前世界 · '+esc(st.world||'未设定')+'</div>';
-  if(['stat','bag','shop','gacha','ach'].includes(curTab) && s.mods[curTab]===false) curTab='task';
+  if(st.paused) h+='<div class="o-paused">已暂停 · 系统退出剧情，不派任务、不计时；点 ▶ 恢复</div>';
+  const _hostR=(s.bindTo&&s.bindTo!=='宿主')?s.bindTo:'';
+  if(['stat','bag','shop','gacha','ach','chat'].includes(curTab) && s.mods[curTab]===false) curTab='task';
   let _tabs=tab('task','任务');
-  if(s.mods.stat)_tabs+=tab('stat','属性'); if(s.mods.bag)_tabs+=tab('bag','背包'); if(s.mods.shop)_tabs+=tab('shop','商城'); if(s.mods.gacha)_tabs+=tab('gacha','抽奖'); if(s.mods.ach)_tabs+=tab('ach','成就'); _tabs+=tab('log','记录');
+  if(s.mods.stat)_tabs+=tab('stat','属性'); if(s.mods.bag)_tabs+=tab('bag','背包'); if(s.mods.shop)_tabs+=tab('shop','商城'); if(s.mods.gacha)_tabs+=tab('gacha','抽奖'); if(s.mods.ach)_tabs+=tab('ach','成就'); if(s.mods.chat!==false) _tabs+=tab('chat',_hostR?'私聊':'对话'); _tabs+=tab('log','记录');
   h+='<div class="o-tabs">'+_tabs+'</div>';
   h+='<div class="o-body">';
   if(curTab==='task'){
@@ -431,6 +441,22 @@ function renderPanel(){
   } else if(curTab==='log'){
     if(!st.log.length) h+='<div class="o-empty">还没有记录。</div>';
     for(let i=st.log.length-1;i>=0;i--){ const l=st.log[i]; h+='<div class="o-lg">'+(l.mark?'<b>'+esc(l.mark)+'</b> ':'')+esc(l.text)+'</div>'; }
+  } else if(curTab==='chat'){
+    const cl=(st.chat||[]).slice(-40);
+    h+='<div class="o-chat">';
+    if(!cl.length) h+='<div class="o-empty">'+(_hostR?('还没有 '+esc(_hostR)+' 和系统的私聊。'+(s.rpChat!=='manual'?'会随正文自动出现。':'点下面按钮生成。')):'跟系统说点什么：问提示、讨价还价、吐槽都行。')+'</div>';
+    let _lt=null;
+    for(const c of cl){
+      if(_hostR && c.who!=='call' && c.turn!=null && c.turn!==_lt){ h+='<div class="o-cturn">第 '+c.turn+' 楼</div>'; _lt=c.turn; }
+      const cls=c.who==='me'?'me':c.who==='sys'?'sys':c.who==='call'?'call':'char';
+      h+='<div class="o-bub '+cls+'">'+(c.who==='char'?'<b>'+esc(c.name||_hostR)+'</b>':'')+(c.who==='call'?'<b>你以系统身份 · 下回合生效</b>':'')+esc(c.text)+(c.note?'<i>'+esc(c.note)+'</i>':'')+'</div>';
+    }
+    h+='</div>';
+    h+='<div class="o-chatin"><input data-chat placeholder="'+(_hostR?('以系统的口吻对 '+esc(_hostR)+' 说'):'跟系统说点什么')+'"><button class="o-act" style="width:auto;margin:0;padding:6px 12px" data-a="'+(_hostR?'chatcall':'chatsend')+'">'+(_hostR?'喊话':'发送')+'</button></div>';
+    h+='<div class="o-cfoot">';
+    if(_hostR){ h+='<span>私聊：'+(s.rpChat!=='manual'?'随正文生成':'手动生成')+'</span><span>·</span><span class="o-mini" data-a="chatgen">让他们聊一段（花 1 次请求）</span>'; }
+    else { h+='<label style="display:inline-flex;gap:4px;align-items:center"><input type="checkbox" style="width:auto;margin:0" data-i="chatToStory"'+(s.chatToStory!==false?' checked':'')+'>结果进剧情</label><span>·</span><span>'+(s.chatMode==='api'?'独立 API':'跟随酒馆')+'</span><span>·</span><span>每条 1 次请求</span>'; }
+    h+='<span>·</span><span class="o-mini" data-a="chatclear">清空</span></div>';
   } else if(curTab==='set'){
     h+='<div class="o-desc" style="margin-bottom:6px">世界名/简述</div><input data-i="world" value="'+esc(st.world)+'">';
     h+='<div class="o-desc" style="margin:8px 0 2px">任务频率：每 <b data-fv>'+s.freq+'</b> 回合最多一个</div><input type="range" min="1" max="10" step="1" value="'+s.freq+'" data-i="freq">';
@@ -442,7 +468,7 @@ function renderPanel(){
     h+='<div class="o-desc" style="margin:8px 0 2px">商城每几回合请模型更新（0=关）</div><input type="number" data-i="shopRefresh" value="'+s.shopRefresh+'">';
     h+='<div class="o-desc" style="margin:8px 0 2px">奖池每几回合请模型更新（0=关）</div><input type="number" data-i="gachaRefresh" value="'+s.gachaRefresh+'">';
     h+='<div class="o-desc" style="margin:10px 0 2px">模块开关</div><div>';
-    [['stat','属性'],['bag','背包'],['shop','商城'],['gacha','抽奖'],['ach','成就']].forEach(function(m){ h+='<label class="o-desc" style="display:inline-flex;gap:5px;align-items:center;margin:2px 12px 2px 0"><input type="checkbox" style="width:auto;margin:0" data-i="mod_'+m[0]+'"'+(s.mods[m[0]]!==false?' checked':'')+'>'+m[1]+'</label>'; });
+    [['stat','属性'],['bag','背包'],['shop','商城'],['gacha','抽奖'],['ach','成就'],['chat','对话']].forEach(function(m){ h+='<label class="o-desc" style="display:inline-flex;gap:5px;align-items:center;margin:2px 12px 2px 0"><input type="checkbox" style="width:auto;margin:0" data-i="mod_'+m[0]+'"'+(s.mods[m[0]]!==false?' checked':'')+'>'+m[1]+'</label>'; });
     h+='</div>';
     h+='<div class="o-desc" style="margin:8px 0 2px">奖励偏好（生成任务时参考，如：多给道具/偏情感向）</div><input data-i="rewardPref" value="'+esc(s.rewardPref)+'">';
     h+='<div class="o-desc" style="margin:8px 0 2px">惩罚偏好（如：不要动好感度/惩罚偏物质）</div><input data-i="penaltyPref" value="'+esc(s.penaltyPref)+'">';
@@ -450,6 +476,12 @@ function renderPanel(){
     h+='<div class="o-desc" style="margin:8px 0 2px">单次抽奖消耗积分</div><input type="number" data-i="drawCost" value="'+s.drawCost+'">';
     h+='<div class="o-desc" style="margin:8px 0 2px">系统绑定对象（填「宿主」=给你派；填角色名=反串，系统归该角色、你旁观）</div><input data-i="bindTo" value="'+esc(s.bindTo)+'">';
     h+='<label class="o-desc" style="display:flex;gap:6px;align-items:center;margin:6px 0"><input type="checkbox" style="width:auto;margin:0" data-i="autoEcon"'+(s.autoEcon?' checked':'')+'>允许角色自主用系统（买/抽奖/用道具·反串模式默认开）</label>';
+    h+='<div class="o-desc" style="margin:14px 0 2px;color:var(--o-acc)">对话 / 私聊</div>';
+    h+='<div class="o-desc" style="margin:4px 0 2px">系统对话走哪个连接</div><select data-i="chatMode"><option value="follow"'+(s.chatMode!=='api'?' selected':'')+'>跟随酒馆当前连接</option><option value="api"'+(s.chatMode==='api'?' selected':'')+'>独立 API（下面填）</option></select>';
+    h+='<div class="o-desc" style="margin:4px 0 2px">独立 API 地址（OpenAI 兼容，如 https://api.xxx.com/v1）</div><input data-i="apiUrl" value="'+esc(s.apiUrl)+'" placeholder="不用独立 API 可留空">';
+    h+='<div class="o-row2"><input data-i="apiModel" value="'+esc(s.apiModel)+'" placeholder="模型名"><input type="password" data-i="apiKey" value="'+esc(s.apiKey)+'" placeholder="密钥（只存在你自己的酒馆设置里）"></div>';
+    h+='<label class="o-desc" style="display:flex;gap:6px;align-items:center;margin:6px 0"><input type="checkbox" style="width:auto;margin:0" data-i="chatToStory"'+(s.chatToStory!==false?' checked':'')+'>宿主和系统的对话结果进剧情（下回合角色会知道有这回事）</label>';
+    h+='<div class="o-desc" style="margin:4px 0 2px">反串私聊（角色与系统）</div><select data-i="rpChat"><option value="auto"'+(s.rpChat!=='manual'?' selected':'')+'>随正文生成（不花请求）</option><option value="manual"'+(s.rpChat==='manual'?' selected':'')+'>只手动按钮生成</option></select>';
     h+='<div class="o-desc" style="margin:8px 0 2px">系统名</div><input data-i="sysName" value="'+esc(s.sysName)+'">';
     h+='<div class="o-desc" style="margin:8px 0 2px">人格腔调</div><select data-i="personality"><option>冷澈</option><option>毒舌</option><option>傲娇</option><option>温和</option></select>';
     h+='<div class="o-desc" style="margin:8px 0 2px">自定义人格（填了就覆盖上面）</div><textarea data-i="personaText" rows="2">'+esc(s.personaText)+'</textarea>';
@@ -462,6 +494,7 @@ function renderPanel(){
   p.innerHTML=h;
   const sel=p.querySelector('select[data-i="personality"]'); if(sel) sel.value=s.personality;
   bind(p);
+  if(curTab==='chat'){ const b=p.querySelector('.o-body'); if(b) b.scrollTop=b.scrollHeight; }
 }
 
 function bind(p){
@@ -469,6 +502,7 @@ function bind(p){
   const head=p.querySelector('.o-head'); if(head) makeDrag(head, document.getElementById('origin-panel'), null);
   p.querySelectorAll('.o-tab').forEach(t=>t.onclick=()=>{ curTab=t.getAttribute('data-tab'); renderPanel(); });
   p.querySelectorAll('[data-a]').forEach(el=>el.onclick=()=>action(el.getAttribute('data-a'), el));
+  const ci=p.querySelector('[data-chat]'); if(ci){ ci.addEventListener('keydown',e=>{ if(e.key==='Enter'&&!e.shiftKey){ e.preventDefault(); const b=p.querySelector('[data-a="chatsend"],[data-a="chatcall"]'); if(b) b.click(); } }); }
   p.querySelectorAll('[data-del]').forEach(el=>el.onclick=()=>{ st.stats.splice(+el.getAttribute('data-del'),1); saveMeta(); renderPanel(); });
   p.querySelectorAll('[data-i]').forEach(el=>{
     const k=el.getAttribute('data-i');
@@ -575,9 +609,80 @@ async function genTask(){
     else { try{ toastr.warning('Origin：没生成出来，再点一次或手动添加'); }catch(_){}; console.log('[Origin] genTask原始输出:', out); }
   } finally { genBusy=false; }
 }
+
+// =================== 对话 / 私聊 ===================
+async function callLLM(system, msgs){
+  const s=settings(), ctx=getContext();
+  if(s.chatMode==='api'){
+    if(!s.apiUrl) throw new Error('没填独立 API 地址');
+    const url=s.apiUrl.replace(/\/+$/,'')+(/\/chat\/completions$/.test(s.apiUrl.replace(/\/+$/,''))?'':'/chat/completions');
+    let r;
+    try{ r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+(s.apiKey||'')},body:JSON.stringify({model:s.apiModel||'gpt-4o-mini',messages:[{role:'system',content:system}].concat(msgs),max_tokens:700,temperature:0.9})}); }
+    catch(e){ throw new Error('连不上（可能该 API 不允许浏览器直连，改用「跟随酒馆」）'); }
+    if(!r.ok) throw new Error('HTTP '+r.status);
+    const j=await r.json(); const ch=j.choices&&j.choices[0]; return (ch&&((ch.message&&ch.message.content)||ch.text))||'';
+  }
+  const flat=system+'\n\n【对话】\n'+msgs.map(m=>(m.role==='user'?'宿主：':'系统：')+m.content).join('\n')+'\n系统：';
+  let out='';
+  try{ out=await ctx.generateRaw({prompt:flat, systemPrompt:''}); }
+  catch(e){ try{ out=await ctx.generateRaw(flat,'',false,false); }catch(e2){ out=await ctx.generateQuietPrompt(flat); } }
+  return out;
+}
+function stripHtml(t){ return String(t||'').replace(/<thinking>[\s\S]*?<\/thinking>/gi,'').replace(/<[^>]+>/g,'').replace(/\n{3,}/g,'\n\n').trim(); }
+async function sysChat(text){
+  const ctx=getContext(), st=meta(), s=settings(); if(!st||!text) return;
+  if(genBusy && Date.now()-genBusyAt<60000){ try{ toastr.info('Origin：上一条还没回来'); }catch(_){} return; } genBusy=true; genBusyAt=Date.now();
+  st.chat=st.chat||[]; st.chat.push({who:'me',text,turn:curTurn()}); saveMeta(); renderPanel();
+  try{
+    const active=st.tasks.filter(t=>t.status==='active');
+    let sys='你是「'+s.sysName+'」，附在宿主身上的系统。现在宿主在系统频道里直接和你说话（不在故事正文里，其他角色听不见）。说话风格：'+persona()+'\n';
+    sys+='世界：'+(st.world||'未设定')+'。宿主积分 '+st.points+'，Lv.'+st.level+(st.stats.length?'，属性：'+st.stats.map(x=>x.name+x.val).join(' '):'')+'。\n';
+    sys+='进行中任务：'+(active.length?active.map(t=>'#'+t.id+' '+t.title+'（'+(t.progress||0)+'%'+(tRemain(t)!=null?'，剩'+Math.max(0,tRemain(t))+'回合':'')+'；要求:'+(t.cond||'—')+'）').join('；'):'无')+'。\n';
+    if(st.bag.length) sys+='背包：'+st.bag.map(b=>b.name+'×'+(b.count||1)).join('，')+'。\n';
+    if(s.mods.shop && st.shop.length) sys+='商城：'+st.shop.slice(0,8).map(x=>x.name+'('+x.price+')').join('／')+'。\n';
+    const recent=(ctx.chat||[]).filter(m=>!m.is_system).slice(-2).map(m=>(m.is_user?'宿主：':'')+stripHtml(m.mes).slice(0,350)).join('\n');
+    if(recent) sys+='最近剧情节选：\n'+recent+'\n';
+    sys+='要求：只以系统身份回应，1-3 句、不超过 120 字，不写旁白不写动作，用上面的风格。可以答应、拒绝、讨价还价，但要有系统的原则。\n如果你决定改动（改任务进度或时限、发新任务、加减积分、给道具），在回复末尾另起一行附数据块，格式：\n<origin>\n进度|任务id|百分比|依据\n完成|任务id\n时限|任务id|新的剩余回合数\n新任务|类型:主线或支线或日常|标题:…|描述:…|条件:…|奖励:…|惩罚:…|时限:N\n积分|+N或-N|理由\n获得|物品名|数量\n</origin>\n不改动就不要附数据块。';
+    const msgs=st.chat.filter(c=>c.who==='me'||c.who==='sys').slice(-12).map(c=>({role:c.who==='me'?'user':'assistant',content:c.text}));
+    const out=await callLLM(sys, msgs);
+    let reply=String(out||'').replace(/<thinking>[\s\S]*?<\/thinking>/gi,'').trim(); let blk=null;
+    const mm=reply.match(/<origin>([\s\S]*?)(?:<\/origin>|$)/i); if(mm){ blk=mm[1].trim(); reply=reply.replace(mm[0],'').trim(); }
+    reply=reply.replace(/^系统[：:]\s*/,'').trim();
+    const n0=st.log.length; if(blk && blk!=='无') applyBlock(blk);
+    const notes=st.log.slice(n0).map(l=>l.text).join('；');
+    st.chat.push({who:'sys',text:reply||'（系统没有回应）',note:notes,turn:curTurn()});
+    if(st.chat.length>80) st.chat=st.chat.slice(-80);
+    if(s.chatToStory!==false){ st.pendingEvent=st.pendingEvent||[]; st.pendingEvent.push('宿主刚在系统频道对系统说「'+text.slice(0,80)+'」，系统答「'+(reply||'').slice(0,80)+'」'+(notes?'（随之生效：'+notes+'）':'')+'。这段对话只有宿主和系统知道，其他角色听不见，但宿主的言行可以受它影响'); }
+    saveMeta(); renderPanel();
+  }catch(e){ console.error('[Origin] 对话失败',e); st.chat.push({who:'sys',text:'（连接失败：'+(e&&e.message||e)+'）',turn:curTurn()}); saveMeta(); renderPanel(); }
+  finally{ genBusy=false; }
+}
+async function genRpChat(){
+  const ctx=getContext(), st=meta(), s=settings(); if(!st) return;
+  const host=(s.bindTo&&s.bindTo!=='宿主')?s.bindTo:''; if(!host) return;
+  if(genBusy && Date.now()-genBusyAt<60000) return; genBusy=true; genBusyAt=Date.now();
+  try{
+    let cd=''; try{ const c=(ctx.characters||[])[ctx.characterId]; if(c) cd=String(c.description||'').slice(0,500); }catch(_){}
+    const active=st.tasks.filter(t=>t.status==='active');
+    const recent=(ctx.chat||[]).filter(m=>!m.is_system).slice(-3).map(m=>stripHtml(m.mes).slice(0,400)).join('\n');
+    const prev=(st.chat||[]).filter(c=>c.who!=='me').slice(-8).map(c=>((c.who==='sys'||c.who==='call')?'系统':host)+'：'+c.text).join('\n');
+    const sys='写一段「'+host+'」和附身在他身上的系统「'+s.sysName+'」的私下对话，只有他听得见系统，不进正文。系统说话风格：'+persona()+'。'+host+' 说话要贴他的人设。\n【角色】'+cd+'\n【世界】'+(st.world||'未设定')+'\n【他的任务】'+(active.length?active.map(t=>t.title+'（'+(t.progress||0)+'%）').join('；'):'无')+'\n【最近剧情】\n'+(recent||'（刚开始）')+(prev?'\n【之前的私聊】\n'+prev:'')+'\n只输出 3-6 行，每行严格用：私聊|系统 或 '+host+'|一句话。两边交替，不解释、不加别的。';
+    try{ toastr.info('Origin：正在生成私聊…'); }catch(_){}
+    const out=await callLLM(sys, [{role:'user',content:'开始'}]);
+    let n=0; String(out||'').split('\n').forEach(l=>{ l=l.replace(/｜/g,'|').replace(/^[\s\d.、)）*_>\-]+/,'').trim(); if(l.indexOf('私聊|')===0){ const p=l.split('|'); const who=(p[1]||'').trim(); const txt=p.slice(2).join('|').trim(); if(txt){ st.chat.push({who:/系统/.test(who)?'sys':'char',name:who,text:txt,turn:curTurn()}); n++; } } });
+    if(st.chat.length>80) st.chat=st.chat.slice(-80);
+    if(n){ saveMeta(); renderPanel(); } else { try{ toastr.warning('Origin：没生成出来，再试一次'); }catch(_){} console.log('[Origin] genRpChat:',out); }
+  }catch(e){ console.error(e); try{ toastr.warning('Origin：生成失败 '+(e&&e.message||'')); }catch(_){} }
+  finally{ genBusy=false; }
+}
 function action(a, el){
   const s=settings(), st=meta();
   if(a==='close') openPanel(false);
+  else if(a==='pause'){ if(!st) return; if(!st.paused){ st.paused=true; st.pausedAt=curTurn(); pushLog(st,'系统暂停：退出剧情，时限冻结','·'); try{ toastr.info('Origin：已暂停，系统不再进入剧情'); }catch(_){} } else { const shift=Math.max(0,curTurn()-(st.pausedAt||curTurn())); for(const t of st.tasks){ if(t.status==='active' && t.limit>0) t.startTurn=(t.startTurn||t.turn||0)+shift; } st.lastTaskTurn+=shift; st.lastShopTurn=(st.lastShopTurn||-99)+shift; st.lastGachaTurn=(st.lastGachaTurn||-99)+shift; st.paused=false; delete st.pausedAt; pushLog(st,'系统恢复（冻结了 '+shift+' 回合）','·'); try{ toastr.info('Origin：已恢复'); }catch(_){} } saveMeta(); renderPanel(); }
+  else if(a==='chatsend'){ const inp=document.querySelector('#origin-panel [data-chat]'); const v=(inp&&inp.value||'').trim(); if(!v) return; inp.value=''; sysChat(v); }
+  else if(a==='chatcall'){ const inp=document.querySelector('#origin-panel [data-chat]'); const v=(inp&&inp.value||'').trim(); if(!v||!st) return; const host=(s.bindTo&&s.bindTo!=='宿主')?s.bindTo:'他'; st.chat=st.chat||[]; st.chat.push({who:'call',text:v,turn:curTurn()}); st.pendingEvent=st.pendingEvent||[]; st.pendingEvent.push('系统私下对 '+host+' 说：「'+v+'」——这句话只有 '+host+' 听得见，请让他在本回合对此有所反应（回嘴、照做、不理都行，按人设来），其他角色不知道'); saveMeta(); renderPanel(); try{ toastr.info('Origin：已记下，下回合他会听到'); }catch(_){} }
+  else if(a==='chatgen'){ genRpChat(); }
+  else if(a==='chatclear'){ if(st && confirm('清空这个存档的对话记录？')){ st.chat=[]; saveMeta(); renderPanel(); } }
   else if(a==='night'){ s.night=!s.night; saveS(); renderPanel(); }
   else if(a==='set'){ curTab='set'; renderPanel(); }
   else if(a==='use'){ const b=st.bag[+el.getAttribute('data-bi')]; if(b){ const isTicket=/签|抽奖/.test(b.name); b.count=(b.count||1)-1; if(b.count<=0) st.bag.splice(st.bag.indexOf(b),1); if(isTicket){ pushLog(st,'使用「'+b.name+'」抽奖','·'); saveMeta(); drawGacha(true); } else { if(b.effect) applyEffects(st,b.effect,1); st.pendingUse=st.pendingUse||[]; st.pendingUse.push({name:b.name, desc:b.effect||b.desc||''}); pushLog(st,'使用道具「'+b.name+'」','·'); saveMeta(); renderPanel(); try{ toastr.info('Origin：已使用「'+b.name+'」，下一回合剧情会回应'); }catch(_){}} } }
