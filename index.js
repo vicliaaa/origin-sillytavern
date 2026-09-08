@@ -1,7 +1,7 @@
 import { extension_settings, getContext } from '../../../extensions.js';
 import { saveSettingsDebounced, eventSource, event_types } from '../../../../script.js';
 
-const ORIGIN_VER = 'v1.0.1 · 09-07';
+const ORIGIN_VER = 'v1.1 · 09-08';
 const MOD = 'origin';
 const INJ_KEY = 'origin_state';
 const DEFAULT_GACHA = [
@@ -60,6 +60,7 @@ function meta(){
   if(!o.gachaPool) o.gachaPool=DEFAULT_GACHA.map(x=>Object.assign({},x));
   if(!o.pendingEvent) o.pendingEvent=[];
   if(!o.chat) o.chat=[];
+  if(!o.skills) o.skills=[];
   if(!o.achievements) o.achievements=[]; else { const _s={}; o.achievements=o.achievements.filter(a=>{ if(_s[a.name]) return false; _s[a.name]=1; return true; }); }
   if(o.lastShopTurn===undefined) o.lastShopTurn=-99;
   if(o.lastGachaTurn===undefined) o.lastGachaTurn=-99;
@@ -101,6 +102,7 @@ function buildInjection(){
   out += '世界：'+(st.world||'未设定')+'\n';
   out += '积分：'+st.points+' ｜ 等级 Lv.'+st.level+'\n';
   if(st.stats.length) out += '属性：'+st.stats.map(x=>x.name+x.val).join(' ')+'\n';
+  if(st.skills && st.skills.length) out += (_host||'宿主')+'已掌握的技能（永久持有，写剧情时要体现它们在起作用）：'+st.skills.map(k=>k.name+(k.desc?'（'+k.desc+'）':'')).join('；')+'\n';
   const fmtT=(t)=>{ const rem=tRemain(t); return '  ['+t.type+'#'+t.id+'] '+t.title+'（进度'+(t.progress||0)+'%'+(rem!==null?('，剩'+Math.max(0,rem)+'回合'):'')+'）｜要求:'+(t.cond||'—')+(t.reward?'｜奖:'+t.reward:'')+(t.penalty?'｜罚:'+t.penalty:'')+'\n'; };
   const _primary=_host||'宿主'; const _mine=active.filter(t=>(t.owner||'宿主')===_primary); const _theirs=active.filter(t=>(t.owner||'宿主')!==_primary);
   out += (_host?('【'+_host+'】'):'宿主(user)')+'的进行中任务：\n';
@@ -135,7 +137,7 @@ function buildInjection(){
   out += '4. 系统说话风格：'+persona()+'\n';
   if(_autoEcon) out += '· '+(_host||'宿主')+'手里有系统就要用起来：积分充裕时，主动在合适时机花积分买道具（尤其能助攻当前任务的）、抽奖、或用背包里的道具，别一直攒着不花——金手指就是拿来用的。大约每 3-5 回合至少体现一次他在动用系统（买／抽／用其一），但要有动机、结合剧情，别每回合乱刷。积分不够就不买。要做时在数据块报告：买|商品名 ／ 抽奖 ／ 用道具|名称。\n';
   out += '5. 若'+(_host||'宿主(user)')+'在正文里直接对系统说话或提问（如『系统，…』），系统要用上面的说话风格回应；可以解释任务、给提示、调侃、回应请求或商量；但不得替其做决定，任何积分/属性/任务的实际变动仍必须走下面的数据块。\n';
-  out += '6. 奖励是对宿主有利的（加积分/加属性/加好感/给道具等）；失败惩罚才是不利的。禁止把不利内容写进奖励栏。\n';
+  out += '6. 奖励是对宿主有利的（加积分/加属性/加好感/给道具/给技能等，技能奖励写成 技能：名称）；失败惩罚才是不利的。禁止把不利内容写进奖励栏。\n';
   out += '7. 失败惩罚可以是扣积分、掉属性、失去道具、触发不利事件、或限时未达成的后果等，按剧情自由选，不必总是扣好感，也允许有的任务没有惩罚。\n';
   if(s.rewardPref) out += '8. 奖励偏好：'+s.rewardPref+'。\n';
   if(s.penaltyPref) out += '9. 惩罚偏好：'+s.penaltyPref+'。\n';
@@ -151,6 +153,7 @@ function buildInjection(){
   out += '（★关键：正文里系统「发布/派发/给出」一个新任务时，必须用上面的『新任务|...』这一行来创建它，绝对不能用『进度|』代替。『进度|』只用于更新上面【已经列出】的现有任务。任务id只能用上面列出的数字，禁止自己编造 id、也别写「隐藏ID」。）\n';
   out += '积分|+N或-N|理由　（正文里凡是发放或扣除积分，必须同步写这一行；面板积分以数据块为准，正文的余额要与面板一致）\n';
   out += '属性|名称|+N或-N\n';
+  out += '技能|名称|一句说明　（剧情里真正获得或解锁一项技能/能力/被动时用；技能永久持有、不是物品，别写成获得|）\n';
   out += '播报|一句系统口吻的话（用上面的说话风格）\n';
   if(_host && s.mods.chat!==false && s.rpChat!=='manual') out += '私聊|系统 或 '+_host+'|一句话　（这回合 '+_host+' 和系统私下说的话，只有他听得见、不进正文；2-4行、一行一句、两边交替；这回合没说就不写）\n';
   if(s.mods.bag){ out += '获得|名称|数量　（在剧情里得到某个物品时）\n'; out += '用道具|名称　（在剧情里用掉或消耗了背包里的某个物品时，我会从背包扣掉）\n'; }
@@ -186,10 +189,12 @@ const BLK = new RegExp('<'+BLK_TAG+'>([\\s\\S]*?)<\\/'+BLK_TAG+'>\\s*','gi');
 const BLK_OPEN = new RegExp('<'+BLK_TAG+'>([\\s\\S]*)$','i');
 function cleanNum(x){ const n = parseInt(String(x).replace(/[^0-9-]/g,''),10); return isNaN(n)?0:n; }
 function findTask(st,idOrTitle){ const d=String(idOrTitle==null?'':idOrTitle).replace(/[^0-9]/g,''); if(d!==''){ const t=st.tasks.find(x=>String(x.id)===d); if(t) return t; } const q=String(idOrTitle==null?'':idOrTitle).trim(); if(!q) return undefined; return st.tasks.find(x=>x.status==='active' && (x.title===q || q.indexOf(x.title)>=0 || (x.title&&x.title.indexOf(q)>=0))); }
+function addSkill(st,name,desc){ name=String(name||'').replace(/^[「『"']+|[」』"']+$/g,'').trim(); if(!name) return false; st.skills=st.skills||[]; const ex=st.skills.find(k=>k.name===name); if(ex){ if(desc && !ex.desc) ex.desc=desc; return false; } st.skills.push({name,desc:String(desc||'').trim(),turn:curTurn()}); pushLog(st,'获得技能「'+name+'」'+(desc?'：'+desc:''),'★'); return true; }
 function applyEffects(st, str, sign){
   // 解析 "积分300 魅力+2 好感-10" 之类，sign=+1奖励 / -1惩罚（惩罚里已带符号则尊重）
   if(!str) return;
   let m;
+  if(sign>0){ const reK=/技能\s*[：:]?\s*[「『"']?([^「」『』"'，,;；、。\s]{1,20})[」』"']?(?:[（(]([^）)]{0,80})[）)])?/g; while((m=reK.exec(str))) addSkill(st,m[1],m[2]||''); }
   const reP = /积分\s*([+-]?\d+)/g; while((m=reP.exec(str))) st.points += cleanNum(m[1])*(m[1].match(/^[+-]/)?1:sign>=0?1:-1);
   const reS = /([一-龥A-Za-z·]{1,8}?)\s*([+-]\d+)/g;
   while((m=reS.exec(str))){
@@ -276,6 +281,7 @@ function applyBlock(memo, proseTitle){
     else if(tag==='用道具'||tag==='消耗'){ const nm=p[1]; if(nm){ let b=st.bag.find(x=>x.name===nm); if(!b) b=st.bag.find(x=>nm.indexOf(x.name)>=0||x.name.indexOf(nm)>=0); if(b){ b.count=(b.count||1)-(cleanNum(p[2])||1); if(b.count<=0) st.bag.splice(st.bag.indexOf(b),1); pushLog(st,'消耗物品「'+nm+'」','·'); changed++; } } }
     else if(tag==='播报'){ pushLog(st, p.slice(1).join('｜'),'“'); changed++; }
     else if(tag==='私聊'){ const who=String(p[1]||'').trim(); const txt=p.slice(2).join('|').trim(); if(txt){ st.chat=st.chat||[]; st.chat.push({who:/系统/.test(who)?'sys':'char', name:who, text:txt, turn:curTurn()}); if(st.chat.length>80) st.chat=st.chat.slice(-80); changed++; } }
+    else if(tag==='技能'||tag==='获得技能'||tag==='解锁技能'){ if(addSkill(st,p[1],p.slice(2).join('｜'))) changed++; }
     else if(tag==='时限'){ const t=findTask(st,p[1]); const n=cleanNum(p[2]); if(t && t.status==='active' && n>0){ t.limit=n; t.startTurn=curTurn(); pushLog(st,t.title+'：时限改为 '+n+' 回合','·'); changed++; } }
     else if(tag==='成就'){ if(unlockAch(st,'m_'+(p[1]||''),p[1]||'成就',p[2]||'',100)) changed++; }
   }
@@ -413,6 +419,10 @@ function renderPanel(){
     if(!st.stats.length) h+='<div class="o-empty">还没有属性。</div>';
     for(let i=0;i<st.stats.length;i++){ const x=st.stats[i]; h+='<div class="o-srow"><span>'+esc(x.name)+'</span><span><span class="v">'+x.val+'</span><span class="x" data-del="'+i+'">✕</span></span></div>'; }
     h+='<button class="o-act dash" data-a="addstat">＋ 自定义属性</button>';
+    h+='<div class="o-desc" style="margin:14px 0 4px;color:var(--o-acc)">技能</div>';
+    if(!st.skills||!st.skills.length) h+='<div class="o-empty" style="padding:6px 0">还没有技能。任务奖励、抽奖或剧情里解锁都会记到这里。</div>';
+    else for(let i=0;i<st.skills.length;i++){ const k=st.skills[i]; h+='<div class="o-card"><div class="th"><span class="o-tt">'+esc(k.name)+'</span><span class="x" style="margin-left:auto;color:var(--o-text3);cursor:pointer;font-size:12px" data-a="delskill" data-ki="'+i+'">✕</span></div>'+(k.desc?'<div class="o-desc">'+esc(k.desc)+'</div>':'')+'</div>'; }
+    h+='<button class="o-act dash" data-a="addskill">＋ 添加技能</button>';
   } else if(curTab==='bag'){
     if(!st.bag.length) h+='<div class="o-empty">背包是空的。</div>';
     for(let i=0;i<st.bag.length;i++){ const b=st.bag[i];
@@ -531,7 +541,8 @@ function drawCore(st, free){
   if(!free){ if(st.points < s.drawCost) return null; st.points-=s.drawCost; }
   const tot=st.gachaPool.reduce((a,b)=>a+(b.weight||0),0); let r=Math.random()*tot, pick=st.gachaPool[0];
   for(const g of st.gachaPool){ r-=(g.weight||0); if(r<=0){ pick=g; break; } }
-  const ex=st.bag.find(b=>b.name===pick.name); if(ex) ex.count=(ex.count||1)+1; else st.bag.push({name:pick.name,count:1,desc:pick.desc||'',effect:pick.effect||''});
+  if(/技能/.test(pick.effect||'') || /^技能/.test(pick.tier||'')){ addSkill(st,pick.name,pick.desc||''); }
+  else { const ex=st.bag.find(b=>b.name===pick.name); if(ex) ex.count=(ex.count||1)+1; else st.bag.push({name:pick.name,count:1,desc:pick.desc||'',effect:pick.effect||''}); }
   if(pick.tier==='SSR'||pick.tier==='UR') unlockAch(st,'lucky','欧皇附体','抽到 SSR 及以上',0);
   pushLog(st,'抽奖 → '+(pick.tier?'['+pick.tier+']':'')+pick.name+'（入背包）','★');
   return pick;
@@ -644,6 +655,7 @@ async function sysChat(text){
     sys+='世界：'+(st.world||'未设定')+'。宿主积分 '+st.points+'，Lv.'+st.level+(st.stats.length?'，属性：'+st.stats.map(x=>x.name+x.val).join(' '):'')+'。\n';
     sys+='进行中任务：'+(active.length?active.map(t=>'#'+t.id+' '+t.title+'（'+(t.progress||0)+'%'+(tRemain(t)!=null?'，剩'+Math.max(0,tRemain(t))+'回合':'')+'；要求:'+(t.cond||'—')+'）').join('；'):'无')+'。\n';
     if(st.bag.length) sys+='背包：'+st.bag.map(b=>b.name+'×'+(b.count||1)).join('，')+'。\n';
+    if(st.skills&&st.skills.length) sys+='已掌握技能：'+st.skills.map(k=>k.name+(k.desc?'（'+k.desc+'）':'')).join('；')+'。\n';
     if(s.mods.shop && st.shop.length) sys+='商城：'+st.shop.slice(0,8).map(x=>x.name+'('+x.price+')').join('／')+'。\n';
     const recent=(ctx.chat||[]).filter(m=>!m.is_system).slice(-2).map(m=>(m.is_user?'宿主：':'')+stripHtml(m.mes).slice(0,350)).join('\n');
     if(recent) sys+='最近剧情节选：\n'+recent+'\n';
@@ -687,6 +699,8 @@ function action(a, el){
   else if(a==='chatsend'){ const inp=document.querySelector('#origin-panel [data-chat]'); const v=(inp&&inp.value||'').trim(); if(!v) return; inp.value=''; sysChat(v); }
   else if(a==='chatcall'){ const inp=document.querySelector('#origin-panel [data-chat]'); const v=(inp&&inp.value||'').trim(); if(!v||!st) return; const host=(s.bindTo&&s.bindTo!=='宿主')?s.bindTo:'他'; st.chat=st.chat||[]; st.chat.push({who:'call',text:v,turn:curTurn()}); st.pendingEvent=st.pendingEvent||[]; st.pendingEvent.push('系统私下对 '+host+' 说：「'+v+'」——这句话只有 '+host+' 听得见，请让他在本回合对此有所反应（回嘴、照做、不理都行，按人设来），其他角色不知道'); saveMeta(); renderPanel(); try{ toastr.info('Origin：已记下，下回合他会听到'); }catch(_){} }
   else if(a==='chatgen'){ genRpChat(); }
+  else if(a==='addskill'){ const n=prompt('技能名'); if(n){ const d=prompt('一句说明（可空）','')||''; if(addSkill(st,n,d)){ saveMeta(); renderPanel(); } } }
+  else if(a==='delskill'){ const i=+el.getAttribute('data-ki'); if(st.skills && st.skills[i] && confirm('删除技能「'+st.skills[i].name+'」？')){ st.skills.splice(i,1); saveMeta(); renderPanel(); } }
   else if(a==='chatclear'){ if(st && confirm('清空这个存档的对话记录？')){ st.chat=[]; saveMeta(); renderPanel(); } }
   else if(a==='night'){ s.night=!s.night; saveS(); renderPanel(); }
   else if(a==='set'){ curTab='set'; renderPanel(); }
