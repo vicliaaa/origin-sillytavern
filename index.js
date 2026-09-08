@@ -1,7 +1,7 @@
 import { extension_settings, getContext } from '../../../extensions.js';
 import { saveSettingsDebounced, eventSource, event_types } from '../../../../script.js';
 
-const ORIGIN_VER = 'v1.1 · 09-08';
+const ORIGIN_VER = 'v1.2 · 09-08';
 const MOD = 'origin';
 const INJ_KEY = 'origin_state';
 const DEFAULT_GACHA = [
@@ -74,12 +74,13 @@ function saveMeta(){
 function esc(t){ return String(t==null?'':t).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
 function persona(){ const s=settings(); return (s.personaText&&s.personaText.trim()) ? s.personaText.trim() : (PERSONA[s.personality]||PERSONA['冷澈']); }
 
-function curTurn(){ try{ const chat=getContext().chat||[]; let n=0; for(const m of chat){ if(m && !m.is_user && !m.is_system) n++; } return n; }catch(e){ return 0; } }
+let _turnOverride=null, _replaying=false;
+function curTurn(){ if(_turnOverride!=null) return _turnOverride; try{ const chat=getContext().chat||[]; let n=0; for(const m of chat){ if(m && !m.is_user && !m.is_system) n++; } return n; }catch(e){ return 0; } }
 function lastAiMsg(){ const chat=getContext().chat||[]; for(let i=chat.length-1;i>=0;i--){ const m=chat[i]; if(m && !m.is_user && !m.is_system) return {m,i}; } return null; }
 let _saveChatTimer=0;
 function scheduleSaveChat(){ if(_saveChatTimer) clearTimeout(_saveChatTimer); _saveChatTimer=setTimeout(function(){ _saveChatTimer=0; try{ const c=getContext(); if(c.saveChat) c.saveChat(); }catch(_){}}, 1200); }
 function pruneSnaps(){ try{ const chat=getContext().chat||[]; let seen=0; for(let i=chat.length-1;i>=0;i--){ const m=chat[i]; if(m && !m.is_user && !m.is_system){ seen++; if(seen>15 && m.extra){ delete m.extra.originSnap; delete m.extra.originBlocks; delete m.extra.originBase; } } } }catch(_){}}
-function snapshot(){ try{ const ctx=getContext(); const mm=ctx.chatMetadata??ctx.chat_metadata; if(!mm||!mm[MOD]) return; const la=lastAiMsg(); if(!la) return; if(!la.m.extra) la.m.extra={}; la.m.extra.originSnap=JSON.stringify(mm[MOD]); if(settings().keepAll===false){ pruneSnaps(); scheduleSaveChat(); } else { if(ctx.saveChat) ctx.saveChat(); } }catch(_){}}
+function snapshot(){ if(_replaying) return; try{ const ctx=getContext(); const mm=ctx.chatMetadata??ctx.chat_metadata; if(!mm||!mm[MOD]) return; const la=lastAiMsg(); if(!la) return; if(!la.m.extra) la.m.extra={}; la.m.extra.originSnap=JSON.stringify(mm[MOD]); if(settings().keepAll===false){ pruneSnaps(); scheduleSaveChat(); } else { if(ctx.saveChat) ctx.saveChat(); } }catch(_){}}
 function restoreFromChat(){ try{ const ctx=getContext(); const mm=ctx.chatMetadata??ctx.chat_metadata; if(!mm) return; const la=lastAiMsg(); if(la && la.m.extra && la.m.extra.originSnap){ mm[MOD]=JSON.parse(la.m.extra.originSnap); } }catch(_){}}
 function tRemain(t){ if(!t.limit || t.limit<=0) return null; const elapsed=curTurn()-(t.startTurn||t.turn||curTurn()); return t.limit - elapsed; }
 function checkExpiry(){ const st=meta(); if(!st||st.paused) return; let ch=false; for(const t of st.tasks){ if(t.status==='active'){ const r=tRemain(t); if(r!==null && r<=0){ t.status='failed'; applyEffects(st,t.penalty,-1); pushLog(st,'任务「'+t.title+'」超时失败'+(t.penalty?'　'+t.penalty:''),'!'); if(settings().punishEvent){ st.pendingEvent=st.pendingEvent||[]; st.pendingEvent.push('任务「'+t.title+'」超时失败'+(t.penalty?'（'+t.penalty+'）':'')+'，请让剧情出现一个相称的不利后果'+(settings().penaltyPref?'（后果倾向：'+settings().penaltyPref+'）':'')); } ch=true; } } } if(ch) saveMeta(); }
@@ -151,7 +152,7 @@ function buildInjection(){
   out += '新任务|类型:主线或支线或日常|标题:…|描述:…|条件:…|奖励:积分300 魅力+2|惩罚:…（可空）|时限:'+(s.limitMax>0?('取 '+s.limitMin+'到'+s.limitMax+' 之间的整数，别用更小的'):'一个整数或留空')+'|对象:宿主或角色名（默认宿主，若这是系统给某角色布置的任务就写角色名）\n';
   out += '（新任务每个字段务必用「标签:值」写清楚，例如 奖励:积分300；缺的字段整段不写即可。）\n';
   out += '（★关键：正文里系统「发布/派发/给出」一个新任务时，必须用上面的『新任务|...』这一行来创建它，绝对不能用『进度|』代替。『进度|』只用于更新上面【已经列出】的现有任务。任务id只能用上面列出的数字，禁止自己编造 id、也别写「隐藏ID」。）\n';
-  out += '积分|+N或-N|理由　（正文里凡是发放或扣除积分，必须同步写这一行；面板积分以数据块为准，正文的余额要与面板一致）\n';
+  out += '积分|+N或-N|理由　（正文里凡是发放或扣除积分，必须同步写这一行，不要只在正文里写「积分：N」；面板积分以数据块为准，正文的余额要与面板一致）\n';
   out += '属性|名称|+N或-N\n';
   out += '技能|名称|一句说明　（剧情里真正获得或解锁一项技能/能力/被动时用；技能永久持有、不是物品，别写成获得|）\n';
   out += '播报|一句系统口吻的话（用上面的说话风格）\n';
@@ -204,10 +205,12 @@ function applyEffects(st, str, sign){
     st2.val += cleanNum(m[2]);
   }
 }
-function extractProseTitle(text){ if(!text) return ''; text=String(text);
-  let m=text.match(/任务[一二三四五六七八九十\d]{1,3}\s*[：:]\s*([^。！？\n】]{2,40})/); if(m) return m[1].trim();
-  m=text.match(/【[^】]{0,10}任务[^：:】]{0,8}[：:]\s*([^】\n]{2,40})】/); if(m) return m[1].trim();
-  m=text.match(/任务\s*[：:]\s*([^。！？\n】]{2,40})/); if(m) return m[1].trim();
+function _okTitle(t){ t=String(t||'').trim(); return t && !/^(积分|奖励|惩罚|要求|条件|进度|完成|失败|发放|结算)/.test(t) && !/[×x]\s*\d/.test(t) && !/^[+-]?\d+$/.test(t) ? t : ''; }
+function extractProseTitle(text){ if(!text) return ''; text=String(text); let m,r;
+  m=text.match(/任务[一二三四五六七八九十\d]{1,3}\s*[：:]\s*([^。！？\n】]{2,40})/); if(m && (r=_okTitle(m[1]))) return r;
+  m=text.match(/任务\s*[「『]([^」』\n]{2,30})[」』]/); if(m && (r=_okTitle(m[1]))) return r;
+  m=text.match(/【[^】]{0,10}任务(?!奖励|惩罚|进度|完成|要求|条件|结算|失败)[^：:】]{0,8}[：:]\s*([^】\n]{2,40})】/); if(m && (r=_okTitle(m[1]))) return r;
+  m=text.match(/任务(?!奖励|惩罚|进度|完成|要求|条件|结算|失败)\s*[：:]\s*([^。！？\n】]{2,40})/); if(m && (r=_okTitle(m[1]))) return r;
   return ''; }
 function proseNewTasks(prose){ const out=[]; if(!prose) return out; prose=String(prose);
   for(const m of prose.matchAll(/(主线|支线|日常)?\s*任务\s*阶段\s*([一二三四五六七八九十百零\d]+)\s*已?生成/g)){
@@ -220,16 +223,48 @@ function proseNewTasks(prose){ const out=[]; if(!prose) return out; prose=String
 function proseCompletions(prose){ const out=[]; if(!prose) return out; prose=String(prose);
   for(const m of prose.matchAll(/阶段\s*([一二三四五六七八九十百零\d]+)\s*(?:已达成|已完成)/g)) out.push(m[1]);
   return out; }
-function syncPointsFromProse(st, prose, blockHadPoints){
-  if(!prose) return false; prose=String(prose);
-  let m=prose.match(/积分余额\s*[：:]?\s*(\d{1,7})/);
-  if(m){ const v=parseInt(m[1],10); if(!isNaN(v) && v!==st.points){ st.points=v; pushLog(st,'积分同步为 '+v+'（按正文余额）','·'); return true; } return false; }
+function syncPointsFromProse(st, prose, blockHadPoints, prevPoints){
+  if(!prose) return false; prose=String(prose).replace(/<[^>]+>/g,' ');
+  let bal=null;
+  for(const r of prose.matchAll(/(?:积分余额|当前积分|剩余积分|积分)\s*[：:]\s*(\d{1,7})(?!\s*[%％])/g)) bal=parseInt(r[1],10);
+  if(bal!=null && !isNaN(bal)){
+    // 和注入给它的旧值一样、且数据块里已经报了变动 → 只是抄了旧值，不算数
+    if(prevPoints!=null && bal===prevPoints && blockHadPoints) return false;
+    if(bal!==st.points){ st.points=bal; pushLog(st,'积分同步为 '+bal+'（按正文余额）','·'); return true; }
+    return false;
+  }
   if(blockHadPoints) return false;
   let ch=false;
-  for(const r of prose.matchAll(/积分\s*[：:]?\s*(\d{1,6})\s*已发放/g)){ st.points+=parseInt(r[1],10); ch=true; }
-  for(const c of prose.matchAll(/扣除积分\s*[：:]?\s*(\d{1,6})/g)){ st.points-=parseInt(c[1],10); ch=true; }
+  for(const seg of prose.split(/[。\n]/)){
+    if(!/(奖励发放|发放|到账|结算|已存入|存入|已获得|扣除|扣减|惩罚)/.test(seg)) continue;
+    if(/(任务奖励|奖励[：:]|完成后|达成后|可获得|将获得|即可获得)/.test(seg) && !/(发放|存入|到账|已获得)/.test(seg)) continue;
+    const neg=/(扣除|扣减|惩罚|扣)/.test(seg);
+    for(const r of seg.matchAll(/积分\s*([+-]?\d{1,6})/g)){ let v=parseInt(r[1],10); if(isNaN(v)) continue; if(!/^[+-]/.test(r[1]) && neg) v=-v; st.points+=v; ch=true; }
+  }
   if(ch) pushLog(st,'积分按正文补记，现为 '+st.points,'·');
   return ch;
+}
+function syncBagFromProse(st, prose, blockHadGet){
+  if(!prose || blockHadGet) return 0; prose=String(prose).replace(/<[^>]+>/g,' '); let n=0;
+  for(const seg of prose.split(/[。\n]/)){
+    if(!/(奖励发放|已存入背包|存入背包|放入背包|已放入|到账|已获得|获得)/.test(seg)) continue;
+    if(/(任务奖励|奖励[：:]|完成后|达成后|可获得|将获得|即可获得)/.test(seg) && !/(发放|存入|到账|已获得)/.test(seg)) continue; // 只是预告奖励，还没拿到
+    for(const r of seg.matchAll(/([一-龥A-Za-z·]{2,12}?)\s*[×xX]\s*(\d{1,3})/g)){
+      const nm=r[1].replace(/^(和|与|及|还有|以及|获得|发放|奖励|存入|背包|的)+/,'').trim(); const c=parseInt(r[2],10)||1;
+      if(!nm || /积分|等级|回合|次|人|天|分钟|小时/.test(nm)) continue;
+      const ex=st.bag.find(b=>b.name===nm); if(ex) ex.count=(ex.count||1)+c; else st.bag.push({name:nm,count:c,desc:'',effect:''});
+      pushLog(st,'获得物品「'+nm+'」×'+c+'（按正文补记）','·'); n++;
+    }
+  }
+  return n;
+}
+function syncSkillsFromProse(st, prose){
+  if(!prose) return 0; prose=String(prose).replace(/<[^>]+>/g,' '); let n=0;
+  for(const r of prose.matchAll(/(?:获得|解锁|习得|激活)(?:被动|主动)?技能\s*[「『【]([^」』】\n]{1,20})[」』】]/g)){
+    let desc=''; const d=prose.slice(r.index).match(/技能说明\s*[：:]\s*([^】\n。]{2,120})/); if(d) desc=d[1].trim();
+    if(addSkill(st,r[1],desc)) n++;
+  }
+  return n;
 }
 function pushLog(st,text,mark){ st.log.push({text, mark:mark||''}); if(st.log.length>40) st.log=st.log.slice(-40); }
 function doneCount(st){ return st.tasks.filter(t=>t.status==='done').length; }
@@ -249,9 +284,13 @@ function applyBlock(memo, proseTitle){
   const st = meta(); if(!st) return;
   st.lastRaw = memo; proseTitle=proseTitle||'';
   const lines = memo.split('\n').map(l=>l.trim().replace(/^[-•·*＊]\s*|^\d+[.、)）]\s*/,'')).filter(l=>l && l!=='无' && !(/^系统\s*[：:]/.test(l) && l.indexOf('|')<0));
-  let changed = 0, gotNew=false, _newG=[];
+  let changed = 0, gotNew=false, _newG=[], _blkBal=null; const _prevP=st.points;
   for(const line of lines){
-    const p = line.split('|').map(x=>x.trim());
+    let p = line.split('|').map(x=>x.trim());
+    if(/^积分\s*[：:]\s*\d+/.test(line)){ const bv=parseInt(line.replace(/^积分\s*[：:]\s*/,''),10); if(!isNaN(bv)) _blkBal=bv; continue; }
+    if(/^\[?(?:主线|支线|日常)?\s*#?\s*\d+\]?$/.test(p[0]) && /^(完成|失败)$/.test(p[1]||'')){ p=[p[1], p[0].replace(/[^0-9]/g,'')]; }
+    if(/^(发布|派发|新任务发布|任务发布|新发布)$/.test(p[0]) && p[1] && !/[：:]/.test(p[1])){ const _tt=p[1]; const _rest=p.slice(2).filter(x=>x && x!=='-' && x!=='—'); const _ty=(_rest.find(x=>/^(主线|支线|日常)$/.test(x))||'支线'); const _ds=_rest.filter(x=>!/^(主线|支线|日常)$/.test(x)).join(' '); p=['新任务','类型:'+_ty,'标题:'+_tt,'描述:'+_ds,'条件:'+_ds]; }
+    if(/^(获取|奖励|结算|发放)$/.test(p[0])){ const mm=(p.slice(1).join('|')).match(/积分\s*([+-]?\d+)/); if(mm){ p=['积分',mm[1],p.slice(2).join('｜')]; } else { const im=(p[1]||'').match(/^(.+?)\s*[×xX]\s*(\d+)$/); p= im ? ['获得',im[1],im[2]] : ['获得',p[1]||'',p[2]||'1']; } }
     if(p.length>=3 && !/^(进度|完成|失败|新任务|积分|属性|播报|获得|用道具|消耗|买|购买|抽奖|成就|新商品|新奖品|私聊|时限)/.test(p[0]) && /^\d+$/.test(p[1]) && /^\d{1,3}\s*%?$/.test(p[2])){ const _tt=p[0]; p.splice(0,1,'进度'); if(!findTask(st,p[1])) p[1]=_tt; }
     const tag = p[0];
     if(tag==='进度'){ let t=findTask(st,p[1]);
@@ -286,6 +325,7 @@ function applyBlock(memo, proseTitle){
     else if(tag==='成就'){ if(unlockAch(st,'m_'+(p[1]||''),p[1]||'成就',p[2]||'',100)) changed++; }
   }
   if(_newG.length){ st.gachaPool=_newG; st.lastGachaTurn=curTurn(); changed++; }
+  if(_blkBal!=null && _blkBal!==_prevP && _blkBal!==st.points){ st.points=_blkBal; pushLog(st,'积分同步为 '+_blkBal+'（按数据块余额）','·'); changed++; }
   if(changed){ saveMeta(); renderPanel(); markNew(true); }
   checkAchievements();
 }
@@ -315,16 +355,44 @@ function harvest(mesId){
   if(!base){ if(m.extra.originBase===undefined){ const _mm=ctx.chatMetadata??ctx.chat_metadata; m.extra.originBase=(_mm&&_mm[MOD])?JSON.stringify(_mm[MOD]):null; } base=m.extra.originBase; }
   if(base){ try{ (ctx.chatMetadata??ctx.chat_metadata)[MOD]=JSON.parse(base); }catch(_){}}
   const block=m.extra.originBlocks[sidx];
-  const _pt=extractProseTitle(m.mes||text);
-  const _paused=!!(meta()&&meta().paused);
+  applyMessage(m, block);
+  snapshot();
+  renderPanel();
+}
+function applyMessage(m, block){
+  const text=m.mes||'';
+  const _pt=extractProseTitle(text);
+  const _st0=meta(); if(!_st0) return; const _paused=!!_st0.paused; const _prevPoints=_st0.points;
   if(!_paused && block && block!=='无') applyBlock(block, _pt);
-  try{ const _st=meta(); if(_st && !_paused){ const _had=!!(block && /积分\|/.test(block)); if(syncPointsFromProse(_st, m.mes||'', _had)) saveMeta(); } }catch(_){}
+  try{ const _st=meta(); if(_st && !_paused){ const _had=!!(block && /(^|\n)\s*积分\|/.test(block)); if(syncPointsFromProse(_st, text, _had, _prevPoints)) saveMeta(); } }catch(_){}
+  try{ const _s3=meta(); if(_s3 && !_paused){ let c=0; c+=syncBagFromProse(_s3, text, !!(block && /(^|\n)\s*获得\|/.test(block))); c+=syncSkillsFromProse(_s3, text); if(c) saveMeta(); } }catch(_){}
   try{ const _s2=meta(); if(_s2 && !_paused){ const _hasNew=!!(block && /新任务\|/.test(block)); let _chg=false;
     if(!_hasNew){ for(const nt of proseNewTasks(m.mes||'')){ if(_s2.tasks.some(t=>t.title===nt.title)) continue; for(const t of _s2.tasks){ if(t.status==='active' && /阶段/.test(t.title)) completeTask(_s2,t); } const t={id:_s2.nextId++, type:nt.type, owner:((settings().bindTo&&settings().bindTo!=='宿主')?settings().bindTo:'宿主'), title:nt.title, desc:nt.desc||nt.title, cond:nt.desc||'', reward:'', penalty:'', limit:0, progress:0, status:'active', turn:curTurn(), startTurn:curTurn()}; _s2.tasks.push(t); _s2.lastTaskTurn=curTurn(); pushLog(_s2,'（按正文建任务）'+t.title,'·'); _chg=true; } }
     for(const sg of proseCompletions(m.mes||'')){ const t=_s2.tasks.find(x=>x.status==='active' && x.title.indexOf('阶段'+sg)>=0); if(t){ completeTask(_s2,t); _chg=true; } }
     if(_chg) saveMeta(); } }catch(_){}
-  snapshot();
-  renderPanel();
+}
+function recalcAll(){
+  const ctx=getContext(), chat=ctx.chat||[]; const mm=ctx.chatMetadata??ctx.chat_metadata; if(!mm) return;
+  if(!confirm('用当前规则把这一局从第一楼重算一遍？任务/积分/背包/技能会按每一楼的数据块和正文重建；世界名、方向、对话记录和已有技能会保留，手动加的任务和物品不会。')) return;
+  const old=mm[MOD]||{}; const keep={skills:old.skills||[], world:old.world||'', direction:old.direction||'', chat:old.chat||[], shop:old.shop, gachaPool:old.gachaPool, paused:!!old.paused};
+  let base=null; for(const m of chat){ if(m&&!m.is_user&&!m.is_system){ if(m.extra&&m.extra.originBase){ base=m.extra.originBase; } break; } }
+  delete mm[MOD]; const st=meta();
+  if(base){ try{ const b=JSON.parse(base); for(const k of ['points','level','exp','expMax','stats','tasks','bag','nextId']) if(b[k]!==undefined) st[k]=b[k]; }catch(_){} }
+  st.world=keep.world; st.direction=keep.direction; st.chat=keep.chat; if(keep.shop) st.shop=keep.shop; if(keep.gachaPool) st.gachaPool=keep.gachaPool; st.paused=false;
+  _replaying=true; let n=0;
+  try{
+    for(let i=0;i<chat.length;i++){ const m=chat[i]; if(!m||m.is_user||m.is_system) continue; n++; _turnOverride=n;
+      if(!m.extra) m.extra={}; m.extra.originBlocks=m.extra.originBlocks||{};
+      const sidx=(typeof m.swipe_id==='number')?m.swipe_id:0; let block=m.extra.originBlocks[sidx];
+      if(block==null){ const text=m.mes||''; let memo=null,mt,re=new RegExp(BLK.source,'gi'); while((mt=re.exec(text))!==null) memo=mt[1]; let strip=memo!==null?new RegExp(BLK.source,'gi'):null; if(memo===null){ const mo=text.match(BLK_OPEN); if(mo){ memo=mo[1]; strip=BLK_OPEN; } } if(memo!==null){ block=memo.trim(); m.extra.originBlocks[sidx]=block; m.mes=text.replace(strip,'').trimEnd(); try{ if(Array.isArray(m.swipes)&&m.swipes[sidx]!=null) m.swipes[sidx]=m.mes; }catch(_){} } }
+      try{ applyMessage(m, block); }catch(e){ console.error('[Origin] 重算第'+i+'楼失败',e); }
+      m.extra.originSnap=JSON.stringify(mm[MOD]);
+    }
+  } finally { _turnOverride=null; _replaying=false; }
+  const st2=meta(); st2.skills=st2.skills||[]; for(const k of keep.skills){ if(!st2.skills.some(x=>x.name===k.name)) st2.skills.push(k); }
+  st2.pendingEvent=[]; st2.pendingUse=[]; st2.paused=keep.paused;
+  pushLog(st2,'已按全部 '+n+' 楼重算','·'); saveMeta(); try{ if(ctx.saveChat) ctx.saveChat(); }catch(_){} curTab='task'; renderPanel();
+  try{ toastr.info('Origin：重算完成，'+n+' 楼'); }catch(_){}
 }
 
 // =================== 悬浮 UI ===================
@@ -502,6 +570,7 @@ function renderPanel(){
     h+='<div class="o-desc" style="margin:8px 0 2px">自定义人格（填了就覆盖上面）</div><textarea data-i="personaText" rows="2">'+esc(s.personaText)+'</textarea>';
     h+='<div class="o-desc" style="margin:8px 0 2px">主色</div><input data-i="accent" value="'+esc(s.accent)+'">';
     h+='<label class="o-desc" style="display:flex;gap:6px;align-items:center;margin:10px 0 2px"><input type="checkbox" style="width:auto;margin:0" data-i="keepAll"'+(s.keepAll!==false?' checked':'')+'>保留全部历史快照（关掉更省电、文件更小；分叉只能回退最近15楼）</label>';
+    h+='<button class="o-act" data-a="recalc" style="margin-top:10px">按全部楼层重算（用当前规则补账）</button>';
     h+='<button class="o-act" data-a="reset" style="border-color:var(--o-fail);color:var(--o-fail);margin-top:10px">清空本局存档</button>';
     h+='<div style="text-align:center;font-size:10px;color:var(--o-text3);margin-top:10px;opacity:.7">Origin '+ORIGIN_VER+'</div>';
   }
@@ -699,6 +768,7 @@ function action(a, el){
   else if(a==='chatsend'){ const inp=document.querySelector('#origin-panel [data-chat]'); const v=(inp&&inp.value||'').trim(); if(!v) return; inp.value=''; sysChat(v); }
   else if(a==='chatcall'){ const inp=document.querySelector('#origin-panel [data-chat]'); const v=(inp&&inp.value||'').trim(); if(!v||!st) return; const host=(s.bindTo&&s.bindTo!=='宿主')?s.bindTo:'他'; st.chat=st.chat||[]; st.chat.push({who:'call',text:v,turn:curTurn()}); st.pendingEvent=st.pendingEvent||[]; st.pendingEvent.push('系统私下对 '+host+' 说：「'+v+'」——这句话只有 '+host+' 听得见，请让他在本回合对此有所反应（回嘴、照做、不理都行，按人设来），其他角色不知道'); saveMeta(); renderPanel(); try{ toastr.info('Origin：已记下，下回合他会听到'); }catch(_){} }
   else if(a==='chatgen'){ genRpChat(); }
+  else if(a==='recalc'){ recalcAll(); }
   else if(a==='addskill'){ const n=prompt('技能名'); if(n){ const d=prompt('一句说明（可空）','')||''; if(addSkill(st,n,d)){ saveMeta(); renderPanel(); } } }
   else if(a==='delskill'){ const i=+el.getAttribute('data-ki'); if(st.skills && st.skills[i] && confirm('删除技能「'+st.skills[i].name+'」？')){ st.skills.splice(i,1); saveMeta(); renderPanel(); } }
   else if(a==='chatclear'){ if(st && confirm('清空这个存档的对话记录？')){ st.chat=[]; saveMeta(); renderPanel(); } }
