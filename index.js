@@ -1,7 +1,7 @@
 import { extension_settings, getContext } from '../../../extensions.js';
 import { saveSettingsDebounced, eventSource, event_types } from '../../../../script.js';
 
-const ORIGIN_VER = 'v1.3.1 · 09-09';
+const ORIGIN_VER = 'v1.3.2 · 09-09';
 const MOD = 'origin';
 const INJ_KEY = 'origin_state';
 const DEFAULT_GACHA = [
@@ -506,6 +506,7 @@ function renderPanel(){
   h+='<div class="o-meta"><span class="pt">积分 <b>'+st.points+'</b></span><span class="lv">Lv.'+st.level+'</span><span class="o-bar"><i style="width:'+Math.round(st.exp/st.expMax*100)+'%"></i></span></div>';
   h+='<div class="o-world">当前世界 · '+esc(st.world||'未设定')+'</div>';
   if(st.paused) h+='<div class="o-paused">已暂停 · 系统退出剧情，不派任务、不计时；点 ▶ 恢复</div>';
+  try{ const la=lastAiMsg(); if(la){ const sid=(typeof la.m.swipe_id==='number')?la.m.swipe_id:0; const blk=la.m.extra&&la.m.extra.originBlocks?la.m.extra.originBlocks[sid]:null; const has=!!(blk&&blk!=='无'); const lines=has?blk.split('\n').filter(l=>l.trim()).length:0; h+='<div class="o-world" style="padding-top:0">上一楼：'+(has?('<span style="color:var(--o-reward)">有数据块 ✓</span> '+lines+' 行'):(blk==='无'?'<span style="color:var(--o-text3)">数据块写了「无」</span>':'<span style="color:var(--o-fail)">没有数据块 ✗</span>（只靠正文兜底）'))+'</div>'; } }catch(_){}
   const _hostR=(s.bindTo&&s.bindTo!=='宿主')?s.bindTo:'';
   if(['stat','bag','shop','gacha','ach','chat'].includes(curTab) && s.mods[curTab]===false) curTab='task';
   let _tabs=tab('task','任务');
