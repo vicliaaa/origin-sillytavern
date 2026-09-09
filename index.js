@@ -1,7 +1,7 @@
 import { extension_settings, getContext } from '../../../extensions.js';
 import { saveSettingsDebounced, eventSource, event_types } from '../../../../script.js';
 
-const ORIGIN_VER = 'v1.2 · 09-08';
+const ORIGIN_VER = 'v1.3 · 09-09';
 const MOD = 'origin';
 const INJ_KEY = 'origin_state';
 const DEFAULT_GACHA = [
@@ -61,6 +61,8 @@ function meta(){
   if(!o.pendingEvent) o.pendingEvent=[];
   if(!o.chat) o.chat=[];
   if(!o.skills) o.skills=[];
+  if(!o.perks) o.perks=[];
+  if(!o.rewardsLog) o.rewardsLog=[];
   if(!o.achievements) o.achievements=[]; else { const _s={}; o.achievements=o.achievements.filter(a=>{ if(_s[a.name]) return false; _s[a.name]=1; return true; }); }
   if(o.lastShopTurn===undefined) o.lastShopTurn=-99;
   if(o.lastGachaTurn===undefined) o.lastGachaTurn=-99;
@@ -103,6 +105,7 @@ function buildInjection(){
   out += '世界：'+(st.world||'未设定')+'\n';
   out += '积分：'+st.points+' ｜ 等级 Lv.'+st.level+'\n';
   if(st.stats.length) out += '属性：'+st.stats.map(x=>x.name+x.val).join(' ')+'\n';
+  if(st.perks && st.perks.length) out += (_host||'宿主')+'已开启的权限/特权（永久有效）：'+st.perks.map(k=>k.name+(k.desc?'（'+k.desc+'）':'')).join('；')+'\n';
   if(st.skills && st.skills.length) out += (_host||'宿主')+'已掌握的技能（永久持有，写剧情时要体现它们在起作用）：'+st.skills.map(k=>k.name+(k.desc?'（'+k.desc+'）':'')).join('；')+'\n';
   const fmtT=(t)=>{ const rem=tRemain(t); return '  ['+t.type+'#'+t.id+'] '+t.title+'（进度'+(t.progress||0)+'%'+(rem!==null?('，剩'+Math.max(0,rem)+'回合'):'')+'）｜要求:'+(t.cond||'—')+(t.reward?'｜奖:'+t.reward:'')+(t.penalty?'｜罚:'+t.penalty:'')+'\n'; };
   const _primary=_host||'宿主'; const _mine=active.filter(t=>(t.owner||'宿主')===_primary); const _theirs=active.filter(t=>(t.owner||'宿主')!==_primary);
@@ -138,7 +141,7 @@ function buildInjection(){
   out += '4. 系统说话风格：'+persona()+'\n';
   if(_autoEcon) out += '· '+(_host||'宿主')+'手里有系统就要用起来：积分充裕时，主动在合适时机花积分买道具（尤其能助攻当前任务的）、抽奖、或用背包里的道具，别一直攒着不花——金手指就是拿来用的。大约每 3-5 回合至少体现一次他在动用系统（买／抽／用其一），但要有动机、结合剧情，别每回合乱刷。积分不够就不买。要做时在数据块报告：买|商品名 ／ 抽奖 ／ 用道具|名称。\n';
   out += '5. 若'+(_host||'宿主(user)')+'在正文里直接对系统说话或提问（如『系统，…』），系统要用上面的说话风格回应；可以解释任务、给提示、调侃、回应请求或商量；但不得替其做决定，任何积分/属性/任务的实际变动仍必须走下面的数据块。\n';
-  out += '6. 奖励是对宿主有利的（加积分/加属性/加好感/给道具/给技能等，技能奖励写成 技能：名称）；失败惩罚才是不利的。禁止把不利内容写进奖励栏。\n';
+  out += '6. 奖励是对宿主有利的（加积分/加属性/加好感/给道具/给技能/开权限等，技能奖励写成 技能：名称、权限写成 权限：名称）；失败惩罚才是不利的。禁止把不利内容写进奖励栏。\n';
   out += '7. 失败惩罚可以是扣积分、掉属性、失去道具、触发不利事件、或限时未达成的后果等，按剧情自由选，不必总是扣好感，也允许有的任务没有惩罚。\n';
   if(s.rewardPref) out += '8. 奖励偏好：'+s.rewardPref+'。\n';
   if(s.penaltyPref) out += '9. 惩罚偏好：'+s.penaltyPref+'。\n';
@@ -155,6 +158,7 @@ function buildInjection(){
   out += '积分|+N或-N|理由　（正文里凡是发放或扣除积分，必须同步写这一行，不要只在正文里写「积分：N」；面板积分以数据块为准，正文的余额要与面板一致）\n';
   out += '属性|名称|+N或-N\n';
   out += '技能|名称|一句说明　（剧情里真正获得或解锁一项技能/能力/被动时用；技能永久持有、不是物品，别写成获得|）\n';
+  out += '权限|名称|一句说明　（开启某项权限/特权/功能/称号时用，永久持有）\n';
   out += '播报|一句系统口吻的话（用上面的说话风格）\n';
   if(_host && s.mods.chat!==false && s.rpChat!=='manual') out += '私聊|系统 或 '+_host+'|一句话　（这回合 '+_host+' 和系统私下说的话，只有他听得见、不进正文；2-4行、一行一句、两边交替；这回合没说就不写）\n';
   if(s.mods.bag){ out += '获得|名称|数量　（在剧情里得到某个物品时）\n'; out += '用道具|名称　（在剧情里用掉或消耗了背包里的某个物品时，我会从背包扣掉）\n'; }
@@ -190,13 +194,42 @@ const BLK = new RegExp('<'+BLK_TAG+'>([\\s\\S]*?)<\\/'+BLK_TAG+'>\\s*','gi');
 const BLK_OPEN = new RegExp('<'+BLK_TAG+'>([\\s\\S]*)$','i');
 function cleanNum(x){ const n = parseInt(String(x).replace(/[^0-9-]/g,''),10); return isNaN(n)?0:n; }
 function findTask(st,idOrTitle){ const d=String(idOrTitle==null?'':idOrTitle).replace(/[^0-9]/g,''); if(d!==''){ const t=st.tasks.find(x=>String(x.id)===d); if(t) return t; } const q=String(idOrTitle==null?'':idOrTitle).trim(); if(!q) return undefined; return st.tasks.find(x=>x.status==='active' && (x.title===q || q.indexOf(x.title)>=0 || (x.title&&x.title.indexOf(q)>=0))); }
+function addItem(st,name,count,src){
+  name=String(name||'').replace(/^[「『"']+|[」』"']+$/g,'').trim(); count=parseInt(count,10)||1;
+  if(!name || /积分|经验|等级|好感|回合/.test(name) || /^[+-]?\d+$/.test(name)) return false;
+  st._grantT=st._grantT||{}; const t=curTurn();
+  if(src!=='buy' && st._grantT[name]===t) return false;   // 同一回合已经发过这件了（完成发一次、发放句再说一次）
+  st._grantT[name]=t; if(Object.keys(st._grantT).length>60){ const ks=Object.keys(st._grantT); for(const k of ks.slice(0,ks.length-60)) delete st._grantT[k]; }
+  const ex=st.bag.find(b=>b.name===name); if(ex) ex.count=(ex.count||1)+count; else st.bag.push({name,count,desc:'',effect:''});
+  pushLog(st,'获得物品「'+name+'」×'+count+(src?'（'+src+'）':''),'·'); return true;
+}
+function addPerk(st,name,desc,kind){
+  name=String(name||'').replace(/^[「『【"']+|[」』】"']+$/g,'').replace(/^(开启|获得|解锁|激活|授予|了)+/,'').replace(/(已)?(开启|解锁|激活)$/,'').trim();
+  if(!name || name.length<2) return false; st.perks=st.perks||[];
+  if(!kind){ const km=name.match(/(权限|特权|称号|资格|功能|头衔|身份)/); kind=km?km[1]:'权限'; }
+  const ex=st.perks.find(k=>k.name===name); if(ex){ if(desc && !ex.desc) ex.desc=desc; return false; }
+  st.perks.push({name,kind,desc:String(desc||'').trim(),turn:curTurn()}); pushLog(st,'开启'+kind+'「'+name+'」'+(desc?'：'+desc:''),'★'); return true;
+}
+function addRewardLog(st,text,kind){
+  text=String(text||'').trim(); if(!text) return false; st.rewardsLog=st.rewardsLog||[];
+  const t=curTurn(); if(st.rewardsLog.some(r=>r.text===text && r.turn===t)) return false;
+  st.rewardsLog.push({turn:t,kind:kind||'',text}); if(st.rewardsLog.length>40) st.rewardsLog=st.rewardsLog.slice(-40); return true;
+}
+function grantFromText(st,str){
+  // 把一段奖励文字里能认出来的东西全部发下去：物品×N、技能、权限；积分由 applyEffects 处理
+  if(!str) return 0; let n=0; str=String(str);
+  for(const r of str.matchAll(/([一-龥A-Za-z·]{2,12}?)\s*[×xX]\s*(\d{1,3})/g)){ if(addItem(st,r[1].replace(/^(和|与|及|还有|以及|获得|发放|奖励|存入|背包|的)+/,''),r[2],'奖励')) n++; }
+  for(const r of str.matchAll(/(?:开启|获得|解锁|激活|授予|获取)(?:了)?\s*[「『【]?([^「」『』【】\n，,。；;：:、]{2,24}?(?:权限|特权|资格|功能|称号|头衔))[」』】]?/g)){ if(addPerk(st,r[1],'')) n++; }
+  for(const r of str.matchAll(/(?:权限|特权|称号|头衔)\s*[：:]\s*[「『【]?([^」』】\n，,。；;]{2,30})/g)){ if(addPerk(st,r[1],'')) n++; }
+  return n;
+}
 function addSkill(st,name,desc){ name=String(name||'').replace(/^[「『"']+|[」』"']+$/g,'').trim(); if(!name) return false; st.skills=st.skills||[]; const ex=st.skills.find(k=>k.name===name); if(ex){ if(desc && !ex.desc) ex.desc=desc; return false; } st.skills.push({name,desc:String(desc||'').trim(),turn:curTurn()}); pushLog(st,'获得技能「'+name+'」'+(desc?'：'+desc:''),'★'); return true; }
 function applyEffects(st, str, sign){
   // 解析 "积分300 魅力+2 好感-10" 之类，sign=+1奖励 / -1惩罚（惩罚里已带符号则尊重）
   if(!str) return;
   let m;
-  if(sign>0){ const reK=/技能\s*[：:]?\s*[「『"']?([^「」『』"'，,;；、。\s]{1,20})[」』"']?(?:[（(]([^）)]{0,80})[）)])?/g; while((m=reK.exec(str))) addSkill(st,m[1],m[2]||''); }
-  const reP = /积分\s*([+-]?\d+)/g; while((m=reP.exec(str))) st.points += cleanNum(m[1])*(m[1].match(/^[+-]/)?1:sign>=0?1:-1);
+  if(sign>0){ grantFromText(st,str); const reK=/技能\s*[：:]?\s*[「『"']?([^「」『』"'，,;；、。\s]{1,20})[」』"']?(?:[（(]([^）)]{0,80})[）)])?/g; while((m=reK.exec(str))) addSkill(st,m[1],m[2]||''); }
+  const reP = /积分\s*([+-]?\d+)/g; while((m=reP.exec(str))){ const dv=cleanNum(m[1])*(m[1].match(/^[+-]/)?1:sign>=0?1:-1); st.points += dv; st._ptT=st._ptT||{}; st._ptT[curTurn()]=(st._ptT[curTurn()]||[]).concat([dv]); }
   const reS = /([一-龥A-Za-z·]{1,8}?)\s*([+-]\d+)/g;
   while((m=reS.exec(str))){
     const name=m[1].trim(); if(name==='积分'||!name) continue;
@@ -205,7 +238,7 @@ function applyEffects(st, str, sign){
     st2.val += cleanNum(m[2]);
   }
 }
-function _okTitle(t){ t=String(t||'').trim(); return t && !/^(积分|奖励|惩罚|要求|条件|进度|完成|失败|发放|结算)/.test(t) && !/[×x]\s*\d/.test(t) && !/^[+-]?\d+$/.test(t) ? t : ''; }
+function _okTitle(t){ t=String(t||'').trim().replace(/^[「『【"']+|[」』】"'。.]+$/g,'').trim(); return t && !/^(积分|奖励|惩罚|要求|条件|进度|完成|失败|发放|结算)/.test(t) && !/[×x]\s*\d/.test(t) && !/^[+-]?\d+$/.test(t) ? t : ''; }
 function extractProseTitle(text){ if(!text) return ''; text=String(text); let m,r;
   m=text.match(/任务[一二三四五六七八九十\d]{1,3}\s*[：:]\s*([^。！？\n】]{2,40})/); if(m && (r=_okTitle(m[1]))) return r;
   m=text.match(/任务\s*[「『]([^」』\n]{2,30})[」』]/); if(m && (r=_okTitle(m[1]))) return r;
@@ -239,7 +272,7 @@ function syncPointsFromProse(st, prose, blockHadPoints, prevPoints){
     if(!/(奖励发放|发放|到账|结算|已存入|存入|已获得|扣除|扣减|惩罚)/.test(seg)) continue;
     if(/(任务奖励|奖励[：:]|完成后|达成后|可获得|将获得|即可获得)/.test(seg) && !/(发放|存入|到账|已获得)/.test(seg)) continue;
     const neg=/(扣除|扣减|惩罚|扣)/.test(seg);
-    for(const r of seg.matchAll(/积分\s*([+-]?\d{1,6})/g)){ let v=parseInt(r[1],10); if(isNaN(v)) continue; if(!/^[+-]/.test(r[1]) && neg) v=-v; st.points+=v; ch=true; }
+    for(const r of seg.matchAll(/积分\s*([+-]?\d{1,6})/g)){ let v=parseInt(r[1],10); if(isNaN(v)) continue; if(!/^[+-]/.test(r[1]) && neg) v=-v; const _pt=(st._ptT||{})[curTurn()]||[]; const _ix=_pt.indexOf(v); if(_ix>=0){ _pt.splice(_ix,1); continue; } st.points+=v; ch=true; }
   }
   if(ch) pushLog(st,'积分按正文补记，现为 '+st.points,'·');
   return ch;
@@ -247,13 +280,12 @@ function syncPointsFromProse(st, prose, blockHadPoints, prevPoints){
 function syncBagFromProse(st, prose, blockHadGet){
   if(!prose || blockHadGet) return 0; prose=String(prose).replace(/<[^>]+>/g,' '); let n=0;
   for(const seg of prose.split(/[。\n]/)){
-    if(!/(奖励发放|已存入背包|存入背包|放入背包|已放入|到账|已获得|获得)/.test(seg)) continue;
+    if(!/(奖励发放|奖励已发放|发放|已存入背包|存入背包|放入背包|已放入|到账|已获得|获得)/.test(seg)) continue;
     if(/(任务奖励|奖励[：:]|完成后|达成后|可获得|将获得|即可获得)/.test(seg) && !/(发放|存入|到账|已获得)/.test(seg)) continue; // 只是预告奖励，还没拿到
     for(const r of seg.matchAll(/([一-龥A-Za-z·]{2,12}?)\s*[×xX]\s*(\d{1,3})/g)){
       const nm=r[1].replace(/^(和|与|及|还有|以及|获得|发放|奖励|存入|背包|的)+/,'').trim(); const c=parseInt(r[2],10)||1;
       if(!nm || /积分|等级|回合|次|人|天|分钟|小时/.test(nm)) continue;
-      const ex=st.bag.find(b=>b.name===nm); if(ex) ex.count=(ex.count||1)+c; else st.bag.push({name:nm,count:c,desc:'',effect:''});
-      pushLog(st,'获得物品「'+nm+'」×'+c+'（按正文补记）','·'); n++;
+      if(addItem(st,nm,c,'按正文补记')) n++;
     }
   }
   return n;
@@ -289,7 +321,7 @@ function applyBlock(memo, proseTitle){
     let p = line.split('|').map(x=>x.trim());
     if(/^积分\s*[：:]\s*\d+/.test(line)){ const bv=parseInt(line.replace(/^积分\s*[：:]\s*/,''),10); if(!isNaN(bv)) _blkBal=bv; continue; }
     if(/^\[?(?:主线|支线|日常)?\s*#?\s*\d+\]?$/.test(p[0]) && /^(完成|失败)$/.test(p[1]||'')){ p=[p[1], p[0].replace(/[^0-9]/g,'')]; }
-    if(/^(发布|派发|新任务发布|任务发布|新发布)$/.test(p[0]) && p[1] && !/[：:]/.test(p[1])){ const _tt=p[1]; const _rest=p.slice(2).filter(x=>x && x!=='-' && x!=='—'); const _ty=(_rest.find(x=>/^(主线|支线|日常)$/.test(x))||'支线'); const _ds=_rest.filter(x=>!/^(主线|支线|日常)$/.test(x)).join(' '); p=['新任务','类型:'+_ty,'标题:'+_tt,'描述:'+_ds,'条件:'+_ds]; }
+    if(/^(发布|派发|新任务发布|任务发布|新发布)$/.test(p[0]) && p[1] && !/^(类型|标题|描述|条件|奖励|惩罚|时限|对象)\s*[：:]/.test(p[1])){ const _tt=p[1]; const _rest=p.slice(2).filter(x=>x && x!=='-' && x!=='—'); const _ty=(_rest.find(x=>/^(主线|支线|日常)$/.test(x))||'支线'); const _ds=_rest.filter(x=>!/^(主线|支线|日常)$/.test(x)).join(' '); p=['新任务','类型:'+_ty,'标题:'+_tt.replace(/^(新任务|任务)\s*[：:]\s*/,''),'描述:'+_ds,'条件:'+_ds]; }
     if(/^(获取|奖励|结算|发放)$/.test(p[0])){ const mm=(p.slice(1).join('|')).match(/积分\s*([+-]?\d+)/); if(mm){ p=['积分',mm[1],p.slice(2).join('｜')]; } else { const im=(p[1]||'').match(/^(.+?)\s*[×xX]\s*(\d+)$/); p= im ? ['获得',im[1],im[2]] : ['获得',p[1]||'',p[2]||'1']; } }
     if(p.length>=3 && !/^(进度|完成|失败|新任务|积分|属性|播报|获得|用道具|消耗|买|购买|抽奖|成就|新商品|新奖品|私聊|时限)/.test(p[0]) && /^\d+$/.test(p[1]) && /^\d{1,3}\s*%?$/.test(p[2])){ const _tt=p[0]; p.splice(0,1,'进度'); if(!findTask(st,p[1])) p[1]=_tt; }
     const tag = p[0];
@@ -314,7 +346,8 @@ function applyBlock(memo, proseTitle){
     else if(tag==='属性'){ let s2=st.stats.find(x=>x.name===p[1]); if(!s2){ s2={name:p[1],val:0}; st.stats.push(s2);} s2.val+=cleanNum(p[2]); changed++; }
     else if(tag==='新奖品'){ const nm=p[1]; if(nm){ _newG.push({name:nm,tier:(p[2]||'R'),weight:cleanNum(p[3])||10,desc:p[4]||'',effect:(p[5]||'')}); } }
     else if(tag==='新商品'){ const nm=p[1]; if(nm){ const it={name:nm,price:cleanNum(p[2])||300,desc:p[3]||'',effect:(p[4]||'')}; const ex=st.shop.find(x=>x.name===nm); if(ex) Object.assign(ex,it); else st.shop.push(it); if(st.shop.length>12) st.shop=st.shop.slice(-12); st.lastShopTurn=curTurn(); changed++; } }
-    else if(tag==='获得'){ const nm=p[1]; if(nm){ const c=cleanNum(p[2])||1; const ex=st.bag.find(b=>b.name===nm); if(ex) ex.count=(ex.count||1)+c; else st.bag.push({name:nm,count:c,desc:p[3]||'',effect:''}); pushLog(st,'获得物品「'+nm+'」×'+c,'·'); changed++; } }
+    else if(tag==='获得'){ const nm=p[1]; if(nm){ const c=cleanNum(p[2])||1; if(/^(.+?)\s*[×xX]\s*\d+$/.test(nm)){ const im=nm.match(/^(.+?)\s*[×xX]\s*(\d+)$/); if(addItem(st,im[1],im[2],'')) changed++; } else if(addItem(st,nm,c,'')){ const b=st.bag.find(x=>x.name===nm); if(b && p[3] && !b.desc) b.desc=p[3]; changed++; } } }
+    else if(tag==='权限'||tag==='特权'||tag==='称号'||tag==='功能'||tag==='头衔'){ if(addPerk(st,p[1],p.slice(2).join('｜'),tag)) changed++; }
     else if(tag==='买'||tag==='购买'){ const nm=p[1]; if(nm){ let it=st.shop.find(x=>x.name===nm); if(!it) it=st.shop.find(x=>nm.indexOf(x.name)>=0||x.name.indexOf(nm)>=0); if(it && st.points>=it.price){ st.points-=it.price; const ex=st.bag.find(b=>b.name===it.name); if(ex) ex.count=(ex.count||1)+1; else st.bag.push({name:it.name,count:1,desc:it.desc,effect:it.effect||''}); pushLog(st,'（角色）购买「'+it.name+'」(-'+it.price+')','·'); changed++; } } }
     else if(tag==='抽奖'){ const pk=drawCore(st,false); if(pk){ st.pendingEvent=st.pendingEvent||[]; st.pendingEvent.push('抽奖抽中了'+(pk.tier?pk.tier+'级':'')+'「'+pk.name+'」'+(pk.desc?'（'+pk.desc+'）':'')+'，请把开箱那一刻写进正文'); changed++; } }
     else if(tag==='用道具'||tag==='消耗'){ const nm=p[1]; if(nm){ let b=st.bag.find(x=>x.name===nm); if(!b) b=st.bag.find(x=>nm.indexOf(x.name)>=0||x.name.indexOf(nm)>=0); if(b){ b.count=(b.count||1)-(cleanNum(p[2])||1); if(b.count<=0) st.bag.splice(st.bag.indexOf(b),1); pushLog(st,'消耗物品「'+nm+'」','·'); changed++; } } }
@@ -365,6 +398,16 @@ function applyMessage(m, block){
   const _st0=meta(); if(!_st0) return; const _paused=!!_st0.paused; const _prevPoints=_st0.points;
   if(!_paused && block && block!=='无') applyBlock(block, _pt);
   try{ const _st=meta(); if(_st && !_paused){ const _had=!!(block && /(^|\n)\s*积分\|/.test(block)); if(syncPointsFromProse(_st, text, _had, _prevPoints)) saveMeta(); } }catch(_){}
+  try{ const _s4=meta(); if(_s4 && !_paused){ const plain=String(text).replace(/<[^>]+>/g,' '); let c=0;
+    for(const r of plain.matchAll(/【\s*(任务奖励|奖励已发放|奖励发放|系统奖励|结算奖励|奖励结算|奖励)\s*[：:]\s*([^】\n]{1,200})】/g)){ if(addRewardLog(_s4,r[2].trim(),/发放|结算/.test(r[1])?'发放':'预告')) c++; }
+    for(const r of plain.matchAll(/(?:^|[。\n])\s*奖励(?:已)?发放\s*[：:]\s*([^。\n】]{1,200})/g)){ if(addRewardLog(_s4,r[1].trim(),'发放')) c++; }
+    // 预告的奖励挂到本回合新建、还没有奖励字段的任务上，完成时统一按它发
+    const pre=(_s4.rewardsLog||[]).filter(r=>r.turn===curTurn() && r.kind==='预告');
+    if(pre.length){ for(const t of _s4.tasks){ if(t.status==='active' && !t.reward && t.turn===curTurn()){ t.reward=pre[pre.length-1].text; c++; } } }
+    // 已发放的：权限/称号这类当场入栏（物品和积分由下面各自的兜底处理）
+    for(const r of (_s4.rewardsLog||[]).filter(r=>r.turn===curTurn() && r.kind==='发放')){ for(const q of r.text.matchAll(/([^「」『』【】\n，,。；;：:、]{2,24}?(?:权限|特权|资格|功能|称号|头衔))(?:已)?(?:开启|解锁|激活)?/g)){ if(addPerk(_s4,q[1],'')) c++; } }
+    for(const q of plain.matchAll(/(?:开启|解锁|激活|授予)(?:了)?\s*[「『【]?([^「」『』【】\n，,。；;：:、]{2,24}?(?:权限|特权|资格|功能|称号|头衔))[」』】]?/g)){ const seg=plain.slice(Math.max(0,q.index-40),q.index+40); if(/(任务奖励|完成后|达成后|可获得|将获得|即可)/.test(seg) && !/(发放|已开启|已解锁|已激活)/.test(seg)) continue; if(addPerk(_s4,q[1],'')) c++; }
+    if(c) saveMeta(); } }catch(_){}
   try{ const _s3=meta(); if(_s3 && !_paused){ let c=0; c+=syncBagFromProse(_s3, text, !!(block && /(^|\n)\s*获得\|/.test(block))); c+=syncSkillsFromProse(_s3, text); if(c) saveMeta(); } }catch(_){}
   try{ const _s2=meta(); if(_s2 && !_paused){ const _hasNew=!!(block && /新任务\|/.test(block)); let _chg=false;
     if(!_hasNew){ for(const nt of proseNewTasks(m.mes||'')){ if(_s2.tasks.some(t=>t.title===nt.title)) continue; for(const t of _s2.tasks){ if(t.status==='active' && /阶段/.test(t.title)) completeTask(_s2,t); } const t={id:_s2.nextId++, type:nt.type, owner:((settings().bindTo&&settings().bindTo!=='宿主')?settings().bindTo:'宿主'), title:nt.title, desc:nt.desc||nt.title, cond:nt.desc||'', reward:'', penalty:'', limit:0, progress:0, status:'active', turn:curTurn(), startTurn:curTurn()}; _s2.tasks.push(t); _s2.lastTaskTurn=curTurn(); pushLog(_s2,'（按正文建任务）'+t.title,'·'); _chg=true; } }
@@ -374,7 +417,7 @@ function applyMessage(m, block){
 function recalcAll(){
   const ctx=getContext(), chat=ctx.chat||[]; const mm=ctx.chatMetadata??ctx.chat_metadata; if(!mm) return;
   if(!confirm('用当前规则把这一局从第一楼重算一遍？任务/积分/背包/技能会按每一楼的数据块和正文重建；世界名、方向、对话记录和已有技能会保留，手动加的任务和物品不会。')) return;
-  const old=mm[MOD]||{}; const keep={skills:old.skills||[], world:old.world||'', direction:old.direction||'', chat:old.chat||[], shop:old.shop, gachaPool:old.gachaPool, paused:!!old.paused};
+  const old=mm[MOD]||{}; const keep={skills:old.skills||[], perks:old.perks||[], world:old.world||'', direction:old.direction||'', chat:old.chat||[], shop:old.shop, gachaPool:old.gachaPool, paused:!!old.paused};
   let base=null; for(const m of chat){ if(m&&!m.is_user&&!m.is_system){ if(m.extra&&m.extra.originBase){ base=m.extra.originBase; } break; } }
   delete mm[MOD]; const st=meta();
   if(base){ try{ const b=JSON.parse(base); for(const k of ['points','level','exp','expMax','stats','tasks','bag','nextId']) if(b[k]!==undefined) st[k]=b[k]; }catch(_){} }
@@ -390,6 +433,7 @@ function recalcAll(){
     }
   } finally { _turnOverride=null; _replaying=false; }
   const st2=meta(); st2.skills=st2.skills||[]; for(const k of keep.skills){ if(!st2.skills.some(x=>x.name===k.name)) st2.skills.push(k); }
+  st2.perks=st2.perks||[]; for(const k of (keep.perks||[])){ if(!st2.perks.some(x=>x.name===k.name)) st2.perks.push(k); }
   st2.pendingEvent=[]; st2.pendingUse=[]; st2.paused=keep.paused;
   pushLog(st2,'已按全部 '+n+' 楼重算','·'); saveMeta(); try{ if(ctx.saveChat) ctx.saveChat(); }catch(_){} curTab='task'; renderPanel();
   try{ toastr.info('Origin：重算完成，'+n+' 楼'); }catch(_){}
@@ -491,6 +535,15 @@ function renderPanel(){
     if(!st.skills||!st.skills.length) h+='<div class="o-empty" style="padding:6px 0">还没有技能。任务奖励、抽奖或剧情里解锁都会记到这里。</div>';
     else for(let i=0;i<st.skills.length;i++){ const k=st.skills[i]; h+='<div class="o-card"><div class="th"><span class="o-tt">'+esc(k.name)+'</span><span class="x" style="margin-left:auto;color:var(--o-text3);cursor:pointer;font-size:12px" data-a="delskill" data-ki="'+i+'">✕</span></div>'+(k.desc?'<div class="o-desc">'+esc(k.desc)+'</div>':'')+'</div>'; }
     h+='<button class="o-act dash" data-a="addskill">＋ 添加技能</button>';
+    h+='<div class="o-desc" style="margin:14px 0 4px;color:var(--o-acc)">权限 / 特权</div>';
+    if(!st.perks||!st.perks.length) h+='<div class="o-empty" style="padding:6px 0">还没有权限。系统开启的权限、称号、功能会记到这里。</div>';
+    else for(let i=0;i<st.perks.length;i++){ const k=st.perks[i]; h+='<div class="o-card"><div class="th"><span class="o-tag" style="background:rgba(120,120,160,.2);color:var(--o-text2)">'+esc(k.kind||'权限')+'</span><span class="o-tt">'+esc(k.name)+'</span><span class="x" style="margin-left:auto;color:var(--o-text3);cursor:pointer;font-size:12px" data-a="delperk" data-pi="'+i+'">✕</span></div>'+(k.desc?'<div class="o-desc">'+esc(k.desc)+'</div>':'')+'</div>'; }
+    h+='<button class="o-act dash" data-a="addperk">＋ 添加权限</button>';
+    const rl=(st.rewardsLog||[]).slice(-15).reverse();
+    h+='<details style="margin-top:14px"><summary class="o-desc" style="cursor:pointer;color:var(--o-acc)">奖励流水（原文，'+(st.rewardsLog||[]).length+' 条）</summary>';
+    if(!rl.length) h+='<div class="o-empty" style="padding:6px 0">还没有记录。正文里每一句「任务奖励：…」「奖励已发放：…」都会原样存在这里，解析不了的也不会丢。</div>';
+    else for(const r of rl){ h+='<div class="o-lg"><b>#'+r.turn+' '+esc(r.kind)+'</b> '+esc(r.text)+'</div>'; }
+    h+='</details>';
   } else if(curTab==='bag'){
     if(!st.bag.length) h+='<div class="o-empty">背包是空的。</div>';
     for(let i=0;i<st.bag.length;i++){ const b=st.bag[i];
@@ -724,6 +777,7 @@ async function sysChat(text){
     sys+='世界：'+(st.world||'未设定')+'。宿主积分 '+st.points+'，Lv.'+st.level+(st.stats.length?'，属性：'+st.stats.map(x=>x.name+x.val).join(' '):'')+'。\n';
     sys+='进行中任务：'+(active.length?active.map(t=>'#'+t.id+' '+t.title+'（'+(t.progress||0)+'%'+(tRemain(t)!=null?'，剩'+Math.max(0,tRemain(t))+'回合':'')+'；要求:'+(t.cond||'—')+'）').join('；'):'无')+'。\n';
     if(st.bag.length) sys+='背包：'+st.bag.map(b=>b.name+'×'+(b.count||1)).join('，')+'。\n';
+    if(st.perks&&st.perks.length) sys+='已开启权限：'+st.perks.map(k=>k.name).join('；')+'。\n';
     if(st.skills&&st.skills.length) sys+='已掌握技能：'+st.skills.map(k=>k.name+(k.desc?'（'+k.desc+'）':'')).join('；')+'。\n';
     if(s.mods.shop && st.shop.length) sys+='商城：'+st.shop.slice(0,8).map(x=>x.name+'('+x.price+')').join('／')+'。\n';
     const recent=(ctx.chat||[]).filter(m=>!m.is_system).slice(-2).map(m=>(m.is_user?'宿主：':'')+stripHtml(m.mes).slice(0,350)).join('\n');
@@ -769,6 +823,8 @@ function action(a, el){
   else if(a==='chatcall'){ const inp=document.querySelector('#origin-panel [data-chat]'); const v=(inp&&inp.value||'').trim(); if(!v||!st) return; const host=(s.bindTo&&s.bindTo!=='宿主')?s.bindTo:'他'; st.chat=st.chat||[]; st.chat.push({who:'call',text:v,turn:curTurn()}); st.pendingEvent=st.pendingEvent||[]; st.pendingEvent.push('系统私下对 '+host+' 说：「'+v+'」——这句话只有 '+host+' 听得见，请让他在本回合对此有所反应（回嘴、照做、不理都行，按人设来），其他角色不知道'); saveMeta(); renderPanel(); try{ toastr.info('Origin：已记下，下回合他会听到'); }catch(_){} }
   else if(a==='chatgen'){ genRpChat(); }
   else if(a==='recalc'){ recalcAll(); }
+  else if(a==='addperk'){ const n=prompt('权限/称号名'); if(n){ const d=prompt('一句说明（可空）','')||''; if(addPerk(st,n,d)){ saveMeta(); renderPanel(); } } }
+  else if(a==='delperk'){ const i=+el.getAttribute('data-pi'); if(st.perks && st.perks[i] && confirm('删除「'+st.perks[i].name+'」？')){ st.perks.splice(i,1); saveMeta(); renderPanel(); } }
   else if(a==='addskill'){ const n=prompt('技能名'); if(n){ const d=prompt('一句说明（可空）','')||''; if(addSkill(st,n,d)){ saveMeta(); renderPanel(); } } }
   else if(a==='delskill'){ const i=+el.getAttribute('data-ki'); if(st.skills && st.skills[i] && confirm('删除技能「'+st.skills[i].name+'」？')){ st.skills.splice(i,1); saveMeta(); renderPanel(); } }
   else if(a==='chatclear'){ if(st && confirm('清空这个存档的对话记录？')){ st.chat=[]; saveMeta(); renderPanel(); } }
