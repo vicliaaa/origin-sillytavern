@@ -1,7 +1,7 @@
 import { extension_settings, getContext } from '../../../extensions.js';
 import { saveSettingsDebounced, eventSource, event_types } from '../../../../script.js';
 
-const ORIGIN_VER = 'v1.3 · 09-09';
+const ORIGIN_VER = 'v1.3.1 · 09-09';
 const MOD = 'origin';
 const INJ_KEY = 'origin_state';
 const DEFAULT_GACHA = [
@@ -98,7 +98,7 @@ function buildInjection(){
   if(st.paused) return '';
   checkExpiry(); checkAchievements();
   const active = st.tasks.filter(t=>t.status==='active');
-  let out = '【'+s.sysName+' 状态】\n';
+  let out = '【Origin 状态】'+(s.sysName&&s.sysName!=='Origin'?'（系统名：'+s.sysName+'）':'')+'\n';
   const _host = (s.bindTo && s.bindTo!=='宿主') ? s.bindTo : '';
   const _autoEcon = s.autoEcon || !!_host;
   if(_host) out += '★本系统绑定的是角色【'+_host+'】，不是宿主(user)。任务/积分/属性/成就都属于 '+_host+'；请让 '+_host+' 像突然获得金手指系统的主角那样思考、并主动完成系统任务。宿主(user)是旁观者或其他在场角色，系统不向 user 派任务、也不对 user 说话（除非 user 正在扮演 '+_host+'）。\n';
@@ -180,10 +180,8 @@ function onPromptReady(ev){
     if(!ev || ev.dryRun || !Array.isArray(ev.chat)) return;
     const val = buildInjection(); if(!val) return;
     const msg = { role:'system', content: val };
-    const last = ev.chat[ev.chat.length-1];
-    if(last && last.role==='user' && /^[\s​‌‍﻿]*$/.test(String(last.content||'')))
-      ev.chat.splice(ev.chat.length-1, 0, msg);
-    else ev.chat.push(msg);
+    // v1.3.1：永远放在提示词的最后一条（垫尾之后），模型对末尾指令的服从率最高
+    ev.chat.push(msg);
     try{ const st=meta(); if(st && ((st.pendingUse&&st.pendingUse.length)||(st.pendingEvent&&st.pendingEvent.length))){ st.pendingUse=[]; st.pendingEvent=[]; saveMeta(); } }catch(_){}
   }catch(e){ console.error('[Origin] 注入失败', e); }
 }
