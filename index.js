@@ -1,7 +1,7 @@
 import { extension_settings, getContext } from '../../../extensions.js';
 import { saveSettingsDebounced, eventSource, event_types } from '../../../../script.js';
 
-const ORIGIN_VER = 'v1.3.2 · 09-09';
+const ORIGIN_VER = 'v1.3.3 · 09-11';
 const MOD = 'origin';
 const INJ_KEY = 'origin_state';
 const DEFAULT_GACHA = [
@@ -77,11 +77,12 @@ function esc(t){ return String(t==null?'':t).replace(/[&<>"]/g,c=>({'&':'&amp;',
 function persona(){ const s=settings(); return (s.personaText&&s.personaText.trim()) ? s.personaText.trim() : (PERSONA[s.personality]||PERSONA['冷澈']); }
 
 let _turnOverride=null, _replaying=false;
-function curTurn(){ if(_turnOverride!=null) return _turnOverride; try{ const chat=getContext().chat||[]; let n=0; for(const m of chat){ if(m && !m.is_user && !m.is_system) n++; } return n; }catch(e){ return 0; } }
-function lastAiMsg(){ const chat=getContext().chat||[]; for(let i=chat.length-1;i>=0;i--){ const m=chat[i]; if(m && !m.is_user && !m.is_system) return {m,i}; } return null; }
+function isAiMsg(m){ return !!(m && !m.is_user && !(m.is_system && (m.name==='System' || (m.extra && m.extra.type)))); }
+function curTurn(){ if(_turnOverride!=null) return _turnOverride; try{ const chat=getContext().chat||[]; let n=0; for(const m of chat){ if(isAiMsg(m)) n++; } return n; }catch(e){ return 0; } }
+function lastAiMsg(){ const chat=getContext().chat||[]; for(let i=chat.length-1;i>=0;i--){ const m=chat[i]; if(isAiMsg(m)) return {m,i}; } return null; }
 let _saveChatTimer=0;
 function scheduleSaveChat(){ if(_saveChatTimer) clearTimeout(_saveChatTimer); _saveChatTimer=setTimeout(function(){ _saveChatTimer=0; try{ const c=getContext(); if(c.saveChat) c.saveChat(); }catch(_){}}, 1200); }
-function pruneSnaps(){ try{ const chat=getContext().chat||[]; let seen=0; for(let i=chat.length-1;i>=0;i--){ const m=chat[i]; if(m && !m.is_user && !m.is_system){ seen++; if(seen>15 && m.extra){ delete m.extra.originSnap; delete m.extra.originBlocks; delete m.extra.originBase; } } } }catch(_){}}
+function pruneSnaps(){ try{ const chat=getContext().chat||[]; let seen=0; for(let i=chat.length-1;i>=0;i--){ const m=chat[i]; if(isAiMsg(m)){ seen++; if(seen>15 && m.extra){ delete m.extra.originSnap; delete m.extra.originBlocks; delete m.extra.originBase; } } } }catch(_){}}
 function snapshot(){ if(_replaying) return; try{ const ctx=getContext(); const mm=ctx.chatMetadata??ctx.chat_metadata; if(!mm||!mm[MOD]) return; const la=lastAiMsg(); if(!la) return; if(!la.m.extra) la.m.extra={}; la.m.extra.originSnap=JSON.stringify(mm[MOD]); if(settings().keepAll===false){ pruneSnaps(); scheduleSaveChat(); } else { if(ctx.saveChat) ctx.saveChat(); } }catch(_){}}
 function restoreFromChat(){ try{ const ctx=getContext(); const mm=ctx.chatMetadata??ctx.chat_metadata; if(!mm) return; const la=lastAiMsg(); if(la && la.m.extra && la.m.extra.originSnap){ mm[MOD]=JSON.parse(la.m.extra.originSnap); } }catch(_){}}
 function tRemain(t){ if(!t.limit || t.limit<=0) return null; const elapsed=curTurn()-(t.startTurn||t.turn||curTurn()); return t.limit - elapsed; }
@@ -382,7 +383,7 @@ function harvest(mesId){
     try{ ctx.updateMessageBlock?.(idx, m); }catch(e){}
   }
   let base=null;
-  for(let i=idx-1;i>=0;i--){ const pm=chat[i]; if(pm && !pm.is_user && !pm.is_system && pm.extra && pm.extra.originSnap){ base=pm.extra.originSnap; break; } }
+  for(let i=idx-1;i>=0;i--){ const pm=chat[i]; if(isAiMsg(pm) && pm.extra && pm.extra.originSnap){ base=pm.extra.originSnap; break; } }
   if(!base){ if(m.extra.originBase===undefined){ const _mm=ctx.chatMetadata??ctx.chat_metadata; m.extra.originBase=(_mm&&_mm[MOD])?JSON.stringify(_mm[MOD]):null; } base=m.extra.originBase; }
   if(base){ try{ (ctx.chatMetadata??ctx.chat_metadata)[MOD]=JSON.parse(base); }catch(_){}}
   const block=m.extra.originBlocks[sidx];
@@ -416,13 +417,13 @@ function recalcAll(){
   const ctx=getContext(), chat=ctx.chat||[]; const mm=ctx.chatMetadata??ctx.chat_metadata; if(!mm) return;
   if(!confirm('用当前规则把这一局从第一楼重算一遍？任务/积分/背包/技能会按每一楼的数据块和正文重建；世界名、方向、对话记录和已有技能会保留，手动加的任务和物品不会。')) return;
   const old=mm[MOD]||{}; const keep={skills:old.skills||[], perks:old.perks||[], world:old.world||'', direction:old.direction||'', chat:old.chat||[], shop:old.shop, gachaPool:old.gachaPool, paused:!!old.paused};
-  let base=null; for(const m of chat){ if(m&&!m.is_user&&!m.is_system){ if(m.extra&&m.extra.originBase){ base=m.extra.originBase; } break; } }
+  let base=null; for(const m of chat){ if(isAiMsg(m)){ if(m.extra&&m.extra.originBase){ base=m.extra.originBase; } break; } }
   delete mm[MOD]; const st=meta();
   if(base){ try{ const b=JSON.parse(base); for(const k of ['points','level','exp','expMax','stats','tasks','bag','nextId']) if(b[k]!==undefined) st[k]=b[k]; }catch(_){} }
   st.world=keep.world; st.direction=keep.direction; st.chat=keep.chat; if(keep.shop) st.shop=keep.shop; if(keep.gachaPool) st.gachaPool=keep.gachaPool; st.paused=false;
   _replaying=true; let n=0;
   try{
-    for(let i=0;i<chat.length;i++){ const m=chat[i]; if(!m||m.is_user||m.is_system) continue; n++; _turnOverride=n;
+    for(let i=0;i<chat.length;i++){ const m=chat[i]; if(!isAiMsg(m)) continue; n++; _turnOverride=n;
       if(!m.extra) m.extra={}; m.extra.originBlocks=m.extra.originBlocks||{};
       const sidx=(typeof m.swipe_id==='number')?m.swipe_id:0; let block=m.extra.originBlocks[sidx];
       if(block==null){ const text=m.mes||''; let memo=null,mt,re=new RegExp(BLK.source,'gi'); while((mt=re.exec(text))!==null) memo=mt[1]; let strip=memo!==null?new RegExp(BLK.source,'gi'):null; if(memo===null){ const mo=text.match(BLK_OPEN); if(mo){ memo=mo[1]; strip=BLK_OPEN; } } if(memo!==null){ block=memo.trim(); m.extra.originBlocks[sidx]=block; m.mes=text.replace(strip,'').trimEnd(); try{ if(Array.isArray(m.swipes)&&m.swipes[sidx]!=null) m.swipes[sidx]=m.mes; }catch(_){} } }
