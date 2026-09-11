@@ -1,7 +1,7 @@
 import { extension_settings, getContext } from '../../../extensions.js';
 import { saveSettingsDebounced, eventSource, event_types } from '../../../../script.js';
 
-const ORIGIN_VER = 'v1.3.3 · 09-11';
+const ORIGIN_VER = 'v1.3.4 · 09-11';
 const MOD = 'origin';
 const INJ_KEY = 'origin_state';
 const DEFAULT_GACHA = [
@@ -191,6 +191,21 @@ function onPromptReady(ev){
 const BLK_TAG = '(?:origin[^>]*|数据[板块]|系统数据[板块]?|origin\\s*数据[板块])';
 const BLK = new RegExp('<'+BLK_TAG+'>([\\s\\S]*?)<\\/'+BLK_TAG+'>\\s*','gi');
 const BLK_OPEN = new RegExp('<'+BLK_TAG+'>([\\s\\S]*)$','i');
+// 只认最后一个 <origin> 开头的块；思维链里提到的标签不算（v1.3.4：修复思维链里出现 <origin> 字样时把正文整段剪掉）
+function extractBlock(text){
+  text=String(text||''); if(!text) return null;
+  const masked=text.replace(/<(thinking|think|thought)>[\s\S]*?<\/\1>/gi, x=>' '.repeat(x.length));
+  const openRe=new RegExp('<'+BLK_TAG+'>','gi'); let last=null, mm;
+  while((mm=openRe.exec(masked))!==null) last=mm;
+  if(!last) return null;
+  const bodyStart=last.index+last[0].length;
+  const after=masked.slice(bodyStart);
+  const cm=after.match(new RegExp('<\\/'+BLK_TAG+'>\\s*','i'));
+  const bodyLen=cm?cm.index:after.length;
+  const end=cm?(bodyStart+cm.index+cm[0].length):text.length;
+  if(!cm){ const tail=text.slice(bodyStart).replace(/\s/g,''); if(tail.length>1500) return null; } // 没闭合又拖着一大段，不像块，别剪
+  return { memo:text.slice(bodyStart, bodyStart+bodyLen), start:last.index, end };
+}
 function cleanNum(x){ const n = parseInt(String(x).replace(/[^0-9-]/g,''),10); return isNaN(n)?0:n; }
 function findTask(st,idOrTitle){ const d=String(idOrTitle==null?'':idOrTitle).replace(/[^0-9]/g,''); if(d!==''){ const t=st.tasks.find(x=>String(x.id)===d); if(t) return t; } const q=String(idOrTitle==null?'':idOrTitle).trim(); if(!q) return undefined; return st.tasks.find(x=>x.status==='active' && (x.title===q || q.indexOf(x.title)>=0 || (x.title&&x.title.indexOf(q)>=0))); }
 function addItem(st,name,count,src){
@@ -372,13 +387,10 @@ function harvest(mesId){
   m.extra.originBlocks = m.extra.originBlocks || {};
   const sidx = (typeof m.swipe_id==='number') ? m.swipe_id : 0;
   const text = m.mes || '';
-  let memo=null, strip=null, mm, re=new RegExp(BLK.source,'gi');
-  while((mm=re.exec(text))!==null) memo=mm[1];
-  if(memo!==null){ strip=new RegExp(BLK.source,'gi'); }
-  else { const mo=text.match(BLK_OPEN); if(mo){ memo=mo[1]; strip=BLK_OPEN; } }
-  if(memo!==null){
+  const _ex=extractBlock(text); let memo=_ex?_ex.memo:null;
+  if(_ex){
     m.extra.originBlocks[sidx] = memo.trim();
-    m.mes = text.replace(strip,'').trimEnd();
+    m.mes = (text.slice(0,_ex.start)+text.slice(_ex.end)).trimEnd();
     try{ if(Array.isArray(m.swipes) && m.swipes[sidx]!=null) m.swipes[sidx]=m.mes; }catch(_){}
     try{ ctx.updateMessageBlock?.(idx, m); }catch(e){}
   }
@@ -426,7 +438,7 @@ function recalcAll(){
     for(let i=0;i<chat.length;i++){ const m=chat[i]; if(!isAiMsg(m)) continue; n++; _turnOverride=n;
       if(!m.extra) m.extra={}; m.extra.originBlocks=m.extra.originBlocks||{};
       const sidx=(typeof m.swipe_id==='number')?m.swipe_id:0; let block=m.extra.originBlocks[sidx];
-      if(block==null){ const text=m.mes||''; let memo=null,mt,re=new RegExp(BLK.source,'gi'); while((mt=re.exec(text))!==null) memo=mt[1]; let strip=memo!==null?new RegExp(BLK.source,'gi'):null; if(memo===null){ const mo=text.match(BLK_OPEN); if(mo){ memo=mo[1]; strip=BLK_OPEN; } } if(memo!==null){ block=memo.trim(); m.extra.originBlocks[sidx]=block; m.mes=text.replace(strip,'').trimEnd(); try{ if(Array.isArray(m.swipes)&&m.swipes[sidx]!=null) m.swipes[sidx]=m.mes; }catch(_){} } }
+      if(block==null){ const text=m.mes||''; const ex=extractBlock(text); if(ex){ block=ex.memo.trim(); m.extra.originBlocks[sidx]=block; m.mes=(text.slice(0,ex.start)+text.slice(ex.end)).trimEnd(); try{ if(Array.isArray(m.swipes)&&m.swipes[sidx]!=null) m.swipes[sidx]=m.mes; }catch(_){} } }
       try{ applyMessage(m, block); }catch(e){ console.error('[Origin] 重算第'+i+'楼失败',e); }
       m.extra.originSnap=JSON.stringify(mm[MOD]);
     }
