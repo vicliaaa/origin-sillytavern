@@ -1,7 +1,7 @@
 import { extension_settings, getContext } from '../../../extensions.js';
 import { saveSettingsDebounced, eventSource, event_types } from '../../../../script.js';
 
-const ORIGIN_VER = 'v1.3.4 · 09-11';
+const ORIGIN_VER = 'v1.3.5 · 09-11';
 const MOD = 'origin';
 const INJ_KEY = 'origin_state';
 const DEFAULT_GACHA = [
@@ -195,12 +195,14 @@ const BLK_OPEN = new RegExp('<'+BLK_TAG+'>([\\s\\S]*)$','i');
 function extractBlock(text){
   text=String(text||''); if(!text) return null;
   const masked=text.replace(/<(thinking|think|thought)>[\s\S]*?<\/\1>/gi, x=>' '.repeat(x.length));
-  const openRe=new RegExp('<'+BLK_TAG+'>','gi'); let last=null, mm;
+  // 开头既认 <origin> 这类标签，也认 ```origin 代码围栏
+  const openRe=new RegExp('<'+BLK_TAG+'>|```\\s*(?:origin|数据[板块]|系统数据)[^\\n]*\\n','gi'); let last=null, mm;
   while((mm=openRe.exec(masked))!==null) last=mm;
   if(!last) return null;
+  const isFence=last[0].startsWith('```');
   const bodyStart=last.index+last[0].length;
   const after=masked.slice(bodyStart);
-  const cm=after.match(new RegExp('<\\/'+BLK_TAG+'>\\s*','i'));
+  const cm=after.match(isFence ? /```\s*/ : new RegExp('<\\/'+BLK_TAG+'>\\s*','i'));
   const bodyLen=cm?cm.index:after.length;
   const end=cm?(bodyStart+cm.index+cm[0].length):text.length;
   if(!cm){ const tail=text.slice(bodyStart).replace(/\s/g,''); if(tail.length>1500) return null; } // 没闭合又拖着一大段，不像块，别剪
