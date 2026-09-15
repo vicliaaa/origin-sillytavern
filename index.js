@@ -1,7 +1,7 @@
 import { extension_settings, getContext } from '../../../extensions.js';
 import { saveSettingsDebounced, eventSource, event_types } from '../../../../script.js';
 
-const ORIGIN_VER = 'v1.4 · 09-15';
+const ORIGIN_VER = 'v1.4.1 · 09-16';
 const MOD = 'origin';
 const INJ_KEY = 'origin_state';
 const DEFAULT_GACHA = [
@@ -87,7 +87,9 @@ function snapKey(m){ return (typeof m.swipe_id==='number')?m.swipe_id:0; }
 function getSnap(m){ if(!m||!m.extra) return null; const k=snapKey(m); if(m.extra.originSnaps && m.extra.originSnaps[k]) return m.extra.originSnaps[k]; return m.extra.originSnap||null; }
 function setSnap(m,json){ if(!m.extra) m.extra={}; m.extra.originSnaps=m.extra.originSnaps||{}; m.extra.originSnaps[snapKey(m)]=json; m.extra.originSnap=json; }
 function snapshot(){ if(_replaying) return; try{ const ctx=getContext(); const mm=ctx.chatMetadata??ctx.chat_metadata; if(!mm||!mm[MOD]) return; const la=lastAiMsg(); if(!la) return; setSnap(la.m, JSON.stringify(mm[MOD])); if(settings().keepAll===false){ pruneSnaps(); scheduleSaveChat(); } else { if(ctx.saveChat) ctx.saveChat(); } }catch(_){}}
-function restoreFromChat(){ try{ const ctx=getContext(); const mm=ctx.chatMetadata??ctx.chat_metadata; if(!mm) return; const la=lastAiMsg(); const sj=la?getSnap(la.m):null; if(sj){ mm[MOD]=JSON.parse(sj); } else if(la){ let base=null; const chat=ctx.chat||[]; for(let i=la.i-1;i>=0;i--){ const pm=chat[i]; const pj=isAiMsg(pm)?getSnap(pm):null; if(pj){ base=pj; break; } } if(base) mm[MOD]=JSON.parse(base); } }catch(_){}}
+const KEEP_ON_RESTORE=['direction','world','paused','pausedAt','chat','skills','perks','shop','gachaPool','rewardsLog'];
+function mergeKeep(cur, next){ if(!cur) return next; for(const k of KEEP_ON_RESTORE){ if(cur[k]!==undefined) next[k]=cur[k]; } return next; }
+function restoreFromChat(){ try{ const ctx=getContext(); const mm=ctx.chatMetadata??ctx.chat_metadata; if(!mm) return; const la=lastAiMsg(); const sj=la?getSnap(la.m):null; if(sj){ mm[MOD]=mergeKeep(mm[MOD],JSON.parse(sj)); } else if(la){ let base=null; const chat=ctx.chat||[]; for(let i=la.i-1;i>=0;i--){ const pm=chat[i]; const pj=isAiMsg(pm)?getSnap(pm):null; if(pj){ base=pj; break; } } if(base) mm[MOD]=mergeKeep(mm[MOD],JSON.parse(base)); } }catch(_){}}
 function tRemain(t){ if(!t.limit || t.limit<=0) return null; const elapsed=curTurn()-(t.startTurn||t.turn||curTurn()); return t.limit - elapsed; }
 function checkExpiry(){ const st=meta(); if(!st||st.paused) return; let ch=false; for(const t of st.tasks){ if(t.status==='active'){ const r=tRemain(t); if(r!==null && r<=0){ t.status='failed'; applyEffects(st,t.penalty,-1); pushLog(st,'任务「'+t.title+'」超时失败'+(t.penalty?'　'+t.penalty:''),'!'); if(settings().punishEvent){ st.pendingEvent=st.pendingEvent||[]; st.pendingEvent.push('任务「'+t.title+'」超时失败'+(t.penalty?'（'+t.penalty+'）':'')+'，请让剧情出现一个相称的不利后果'+(settings().penaltyPref?'（后果倾向：'+settings().penaltyPref+'）':'')); } ch=true; } } } if(ch) saveMeta(); }
 function allowNewTask(st){
@@ -402,7 +404,7 @@ function harvest(mesId){
   let base=null;
   for(let i=idx-1;i>=0;i--){ const pm=chat[i]; const pj=isAiMsg(pm)?getSnap(pm):null; if(pj){ base=pj; break; } }
   if(!base){ if(m.extra.originBase===undefined){ const _mm=ctx.chatMetadata??ctx.chat_metadata; m.extra.originBase=(_mm&&_mm[MOD])?JSON.stringify(_mm[MOD]):null; } base=m.extra.originBase; }
-  if(base){ try{ (ctx.chatMetadata??ctx.chat_metadata)[MOD]=JSON.parse(base); }catch(_){}}
+  if(base){ try{ const _mm=(ctx.chatMetadata??ctx.chat_metadata); _mm[MOD]=mergeKeep(_mm[MOD],JSON.parse(base)); }catch(_){}}
   const block=m.extra.originBlocks[sidx];
   applyMessage(m, block);
   snapshot();
