@@ -1,7 +1,7 @@
 import { extension_settings, getContext } from '../../../extensions.js';
 import { saveSettingsDebounced, eventSource, event_types } from '../../../../script.js';
 
-const ORIGIN_VER = 'v1.3.5 · 09-11';
+const ORIGIN_VER = 'v1.4 · 09-15';
 const MOD = 'origin';
 const INJ_KEY = 'origin_state';
 const DEFAULT_GACHA = [
@@ -82,9 +82,12 @@ function curTurn(){ if(_turnOverride!=null) return _turnOverride; try{ const cha
 function lastAiMsg(){ const chat=getContext().chat||[]; for(let i=chat.length-1;i>=0;i--){ const m=chat[i]; if(isAiMsg(m)) return {m,i}; } return null; }
 let _saveChatTimer=0;
 function scheduleSaveChat(){ if(_saveChatTimer) clearTimeout(_saveChatTimer); _saveChatTimer=setTimeout(function(){ _saveChatTimer=0; try{ const c=getContext(); if(c.saveChat) c.saveChat(); }catch(_){}}, 1200); }
-function pruneSnaps(){ try{ const chat=getContext().chat||[]; let seen=0; for(let i=chat.length-1;i>=0;i--){ const m=chat[i]; if(isAiMsg(m)){ seen++; if(seen>15 && m.extra){ delete m.extra.originSnap; delete m.extra.originBlocks; delete m.extra.originBase; } } } }catch(_){}}
-function snapshot(){ if(_replaying) return; try{ const ctx=getContext(); const mm=ctx.chatMetadata??ctx.chat_metadata; if(!mm||!mm[MOD]) return; const la=lastAiMsg(); if(!la) return; if(!la.m.extra) la.m.extra={}; la.m.extra.originSnap=JSON.stringify(mm[MOD]); if(settings().keepAll===false){ pruneSnaps(); scheduleSaveChat(); } else { if(ctx.saveChat) ctx.saveChat(); } }catch(_){}}
-function restoreFromChat(){ try{ const ctx=getContext(); const mm=ctx.chatMetadata??ctx.chat_metadata; if(!mm) return; const la=lastAiMsg(); if(la && la.m.extra && la.m.extra.originSnap){ mm[MOD]=JSON.parse(la.m.extra.originSnap); } }catch(_){}}
+function pruneSnaps(){ try{ const chat=getContext().chat||[]; let seen=0; for(let i=chat.length-1;i>=0;i--){ const m=chat[i]; if(isAiMsg(m)){ seen++; if(seen>15 && m.extra){ delete m.extra.originSnaps; delete m.extra.originSnap; delete m.extra.originBlocks; delete m.extra.originBase; } } } }catch(_){}}
+function snapKey(m){ return (typeof m.swipe_id==='number')?m.swipe_id:0; }
+function getSnap(m){ if(!m||!m.extra) return null; const k=snapKey(m); if(m.extra.originSnaps && m.extra.originSnaps[k]) return m.extra.originSnaps[k]; return m.extra.originSnap||null; }
+function setSnap(m,json){ if(!m.extra) m.extra={}; m.extra.originSnaps=m.extra.originSnaps||{}; m.extra.originSnaps[snapKey(m)]=json; m.extra.originSnap=json; }
+function snapshot(){ if(_replaying) return; try{ const ctx=getContext(); const mm=ctx.chatMetadata??ctx.chat_metadata; if(!mm||!mm[MOD]) return; const la=lastAiMsg(); if(!la) return; setSnap(la.m, JSON.stringify(mm[MOD])); if(settings().keepAll===false){ pruneSnaps(); scheduleSaveChat(); } else { if(ctx.saveChat) ctx.saveChat(); } }catch(_){}}
+function restoreFromChat(){ try{ const ctx=getContext(); const mm=ctx.chatMetadata??ctx.chat_metadata; if(!mm) return; const la=lastAiMsg(); const sj=la?getSnap(la.m):null; if(sj){ mm[MOD]=JSON.parse(sj); } else if(la){ let base=null; const chat=ctx.chat||[]; for(let i=la.i-1;i>=0;i--){ const pm=chat[i]; const pj=isAiMsg(pm)?getSnap(pm):null; if(pj){ base=pj; break; } } if(base) mm[MOD]=JSON.parse(base); } }catch(_){}}
 function tRemain(t){ if(!t.limit || t.limit<=0) return null; const elapsed=curTurn()-(t.startTurn||t.turn||curTurn()); return t.limit - elapsed; }
 function checkExpiry(){ const st=meta(); if(!st||st.paused) return; let ch=false; for(const t of st.tasks){ if(t.status==='active'){ const r=tRemain(t); if(r!==null && r<=0){ t.status='failed'; applyEffects(st,t.penalty,-1); pushLog(st,'任务「'+t.title+'」超时失败'+(t.penalty?'　'+t.penalty:''),'!'); if(settings().punishEvent){ st.pendingEvent=st.pendingEvent||[]; st.pendingEvent.push('任务「'+t.title+'」超时失败'+(t.penalty?'（'+t.penalty+'）':'')+'，请让剧情出现一个相称的不利后果'+(settings().penaltyPref?'（后果倾向：'+settings().penaltyPref+'）':'')); } ch=true; } } } if(ch) saveMeta(); }
 function allowNewTask(st){
@@ -397,7 +400,7 @@ function harvest(mesId){
     try{ ctx.updateMessageBlock?.(idx, m); }catch(e){}
   }
   let base=null;
-  for(let i=idx-1;i>=0;i--){ const pm=chat[i]; if(isAiMsg(pm) && pm.extra && pm.extra.originSnap){ base=pm.extra.originSnap; break; } }
+  for(let i=idx-1;i>=0;i--){ const pm=chat[i]; const pj=isAiMsg(pm)?getSnap(pm):null; if(pj){ base=pj; break; } }
   if(!base){ if(m.extra.originBase===undefined){ const _mm=ctx.chatMetadata??ctx.chat_metadata; m.extra.originBase=(_mm&&_mm[MOD])?JSON.stringify(_mm[MOD]):null; } base=m.extra.originBase; }
   if(base){ try{ (ctx.chatMetadata??ctx.chat_metadata)[MOD]=JSON.parse(base); }catch(_){}}
   const block=m.extra.originBlocks[sidx];
@@ -442,7 +445,7 @@ function recalcAll(){
       const sidx=(typeof m.swipe_id==='number')?m.swipe_id:0; let block=m.extra.originBlocks[sidx];
       if(block==null){ const text=m.mes||''; const ex=extractBlock(text); if(ex){ block=ex.memo.trim(); m.extra.originBlocks[sidx]=block; m.mes=(text.slice(0,ex.start)+text.slice(ex.end)).trimEnd(); try{ if(Array.isArray(m.swipes)&&m.swipes[sidx]!=null) m.swipes[sidx]=m.mes; }catch(_){} } }
       try{ applyMessage(m, block); }catch(e){ console.error('[Origin] 重算第'+i+'楼失败',e); }
-      m.extra.originSnap=JSON.stringify(mm[MOD]);
+      setSnap(m, JSON.stringify(mm[MOD]));
     }
   } finally { _turnOverride=null; _replaying=false; }
   const st2=meta(); st2.skills=st2.skills||[]; for(const k of keep.skills){ if(!st2.skills.some(x=>x.name===k.name)) st2.skills.push(k); }
@@ -873,6 +876,11 @@ jQuery(async ()=>{
   eventSource.on(event_types.MESSAGE_RECEIVED, harvest);
   eventSource.on(event_types.CHAT_CHANGED, onChanged);
   if(event_types.MESSAGE_SWIPED) eventSource.on(event_types.MESSAGE_SWIPED, harvest);
+  // 删楼、切换 swipe：按当前最后一楼（当前 swipe）的快照回读
+  const reread=()=>{ try{ restoreFromChat(); renderPanel(); }catch(_){} };
+  if(event_types.MESSAGE_DELETED) eventSource.on(event_types.MESSAGE_DELETED, reread);
+  if(event_types.CHAT_DELETED) eventSource.on(event_types.CHAT_DELETED, reread);
+  if(event_types.MESSAGE_EDITED) eventSource.on(event_types.MESSAGE_EDITED, ()=>{ try{ const la=lastAiMsg(); if(la) harvest(la.i); }catch(_){} });
   // 设置面板入口（酒馆扩展设置里）
   try{
     const html='<div class="origin-settings"><div class="inline-drawer"><div class="inline-drawer-toggle inline-drawer-header"><b>Origin 系统</b><div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div></div><div class="inline-drawer-content"><label class="checkbox_label"><input id="origin_enabled" type="checkbox"> 启用 Origin</label><small>面板在屏幕上那颗悬浮球，拖动、点开。详细设置在面板里的⚙。</small></div></div></div>';
