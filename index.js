@@ -1,7 +1,7 @@
 import { extension_settings, getContext } from '../../../extensions.js';
 import { saveSettingsDebounced, eventSource, event_types } from '../../../../script.js';
 
-const ORIGIN_VER = 'v1.4.1 · 09-16';
+const ORIGIN_VER = 'v1.4.2 · 09-18';
 const MOD = 'origin';
 const INJ_KEY = 'origin_state';
 const DEFAULT_GACHA = [
@@ -522,7 +522,7 @@ function renderPanel(){
   h+='<span class="o-hbtn" data-a="night" title="日夜">'+(s.night?'☀':'☾')+'</span>';
   h+='<span class="o-hbtn" data-a="set" title="设置">⚙</span>';
   h+='<span class="o-hbtn" data-a="close" title="收起">－</span></div>';
-  h+='<div class="o-persona">'+esc(persona())+'</div>';
+  { const _pt=persona(); const _long=_pt.length>80; h+='<div class="o-persona'+(_long?' clip':'')+'"'+(_long?' data-a="persona-toggle" title="点击展开/收起"':'')+'>'+esc(_pt)+'</div>'; }
   h+='<div class="o-meta"><span class="pt">积分 <b>'+st.points+'</b></span><span class="lv">Lv.'+st.level+'</span><span class="o-bar"><i style="width:'+Math.round(st.exp/st.expMax*100)+'%"></i></span></div>';
   h+='<div class="o-world">当前世界 · '+esc(st.world||'未设定')+'</div>';
   if(st.paused) h+='<div class="o-paused">已暂停 · 系统退出剧情，不派任务、不计时；点 ▶ 恢复</div>';
@@ -841,6 +841,7 @@ function action(a, el){
   else if(a==='chatsend'){ const inp=document.querySelector('#origin-panel [data-chat]'); const v=(inp&&inp.value||'').trim(); if(!v) return; inp.value=''; sysChat(v); }
   else if(a==='chatcall'){ const inp=document.querySelector('#origin-panel [data-chat]'); const v=(inp&&inp.value||'').trim(); if(!v||!st) return; const host=(s.bindTo&&s.bindTo!=='宿主')?s.bindTo:'他'; st.chat=st.chat||[]; st.chat.push({who:'call',text:v,turn:curTurn()}); st.pendingEvent=st.pendingEvent||[]; st.pendingEvent.push('系统私下对 '+host+' 说：「'+v+'」——这句话只有 '+host+' 听得见，请让他在本回合对此有所反应（回嘴、照做、不理都行，按人设来），其他角色不知道'); saveMeta(); renderPanel(); try{ toastr.info('Origin：已记下，下回合他会听到'); }catch(_){} }
   else if(a==='chatgen'){ genRpChat(); }
+  else if(a==='persona-toggle'){ el.classList.toggle('clip'); }
   else if(a==='recalc'){ recalcAll(); }
   else if(a==='addperk'){ const n=prompt('权限/称号名'); if(n){ const d=prompt('一句说明（可空）','')||''; if(addPerk(st,n,d)){ saveMeta(); renderPanel(); } } }
   else if(a==='delperk'){ const i=+el.getAttribute('data-pi'); if(st.perks && st.perks[i] && confirm('删除「'+st.perks[i].name+'」？')){ st.perks.splice(i,1); saveMeta(); renderPanel(); } }
