@@ -1,7 +1,7 @@
 import { extension_settings, getContext } from '../../../extensions.js';
 import { saveSettingsDebounced, eventSource, event_types } from '../../../../script.js';
 
-const ORIGIN_VER = 'v1.4.2 · 09-18';
+const ORIGIN_VER = 'v1.5 · 10-05';
 const MOD = 'origin';
 const INJ_KEY = 'origin_state';
 const DEFAULT_GACHA = [
@@ -33,7 +33,7 @@ function settings(){
     enabled:true, judgeMode:'A', freq:3, blockWhenUnfinished:true,
     taskSource:'auto', fourthWall:0, sysName:'Origin',
     personality:'冷澈', personaText:'', accent:'#b0684c', night:false, rewardPref:'', penaltyPref:'', bindTo:'宿主', autoEcon:false, keepAll:true,
-    budget:1400, drawCost:300, limitMin:0, limitMax:0, punishEvent:true, achieveOn:true, shopRefresh:0, gachaRefresh:0, px:null, py:null, open:false,
+    budget:1400, drawCost:300, limitMin:0, limitMax:0, punishEvent:true, achieveOn:true, shopRefresh:0, gachaRefresh:0, px:null, py:null, open:false, hideOrb:false,
     chatMode:'follow', apiUrl:'', apiKey:'', apiModel:'', chatToStory:true, rpChat:'auto',
   };
   for(const k in d){ if(s[k]===undefined) s[k]=d[k]; }
@@ -483,9 +483,12 @@ function mountUI(){
   if(s.open) openPanel(true);
   try{ restoreFromChat(); }catch(_){}
   if(!s.enabled) root.style.display='none';
+  applyOrb();
   renderPanel();
 }
-function openPanel(v){ const s=settings(); const p=document.getElementById('origin-panel'), o=document.getElementById('origin-orb'); if(!p)return; p.style.display=v?'block':'none'; o.style.display=v?'none':'flex'; s.open=v; saveS(); if(v){ markNew(false); renderPanel(); } }
+function applyOrb(){ const s=settings(); const p=document.getElementById('origin-panel'), o=document.getElementById('origin-orb'); if(!o) return; const open=p&&p.style.display!=='none'; o.style.display=(open||s.hideOrb)?'none':'flex'; }
+function togglePanel(){ const p=document.getElementById('origin-panel'); if(!p) return; const r=document.getElementById('origin-root'); if(r&&!settings().enabled) return; openPanel(p.style.display==='none'); }
+function openPanel(v){ const s=settings(); const p=document.getElementById('origin-panel'), o=document.getElementById('origin-orb'); if(!p)return; p.style.display=v?'block':'none'; o.style.display=(v||s.hideOrb)?'none':'flex'; s.open=v; saveS(); if(v){ markNew(false); renderPanel(); } }
 
 function makeDrag(handle, mover, onClick){
   handle.style.touchAction='none';
@@ -641,6 +644,7 @@ function renderPanel(){
     h+='<div class="o-desc" style="margin:8px 0 2px">人格腔调</div><select data-i="personality"><option>冷澈</option><option>毒舌</option><option>傲娇</option><option>温和</option></select>';
     h+='<div class="o-desc" style="margin:8px 0 2px">自定义人格（填了就覆盖上面）</div><textarea data-i="personaText" rows="2">'+esc(s.personaText)+'</textarea>';
     h+='<div class="o-desc" style="margin:8px 0 2px">主色</div><input data-i="accent" value="'+esc(s.accent)+'">';
+    h+='<label class="o-desc" style="display:flex;gap:6px;align-items:center;margin:10px 0 2px"><input type="checkbox" style="width:auto;margin:0" data-i="hideOrb"'+(s.hideOrb?' checked':'')+'>隐藏悬浮球（改用 /origin 命令、QR 按钮或魔法棒菜单打开面板）</label>';
     h+='<label class="o-desc" style="display:flex;gap:6px;align-items:center;margin:10px 0 2px"><input type="checkbox" style="width:auto;margin:0" data-i="keepAll"'+(s.keepAll!==false?' checked':'')+'>保留全部历史快照（关掉更省电、文件更小；分叉只能回退最近15楼）</label>';
     h+='<button class="o-act" data-a="recalc" style="margin-top:10px">按全部楼层重算（用当前规则补账）</button>';
     h+='<button class="o-act" data-a="reset" style="border-color:var(--o-fail);color:var(--o-fail);margin-top:10px">清空本局存档</button>';
@@ -669,6 +673,7 @@ function bind(p){
       if(el.type==='range'||el.type==='number') v=parseInt(v,10)||0;
       if(k==='world'){ st.world=v; saveMeta(); const wv=p.querySelector('.o-world'); }
       else { s[k]=v; saveS(); }
+      if(k==='hideOrb') applyOrb();
       if(k==='freq'){ const b=p.querySelector('[data-fv]'); if(b)b.textContent=v; }
       if(k==='fourthWall'){ const b=p.querySelector('[data-wv]'); if(b)b.textContent=v; }
       if(['accent','night','sysName','personality','personaText'].includes(k)) renderPanel();
@@ -886,9 +891,24 @@ jQuery(async ()=>{
   if(event_types.MESSAGE_EDITED) eventSource.on(event_types.MESSAGE_EDITED, ()=>{ try{ const la=lastAiMsg(); if(la) harvest(la.i); }catch(_){} });
   // 设置面板入口（酒馆扩展设置里）
   try{
-    const html='<div class="origin-settings"><div class="inline-drawer"><div class="inline-drawer-toggle inline-drawer-header"><b>Origin 系统</b><div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div></div><div class="inline-drawer-content"><label class="checkbox_label"><input id="origin_enabled" type="checkbox"> 启用 Origin</label><small>面板在屏幕上那颗悬浮球，拖动、点开。详细设置在面板里的⚙。</small></div></div></div>';
+    const html='<div class="origin-settings"><div class="inline-drawer"><div class="inline-drawer-toggle inline-drawer-header"><b>Origin 系统</b><div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div></div><div class="inline-drawer-content"><label class="checkbox_label"><input id="origin_enabled" type="checkbox"> 启用 Origin</label><label class="checkbox_label"><input id="origin_hideorb" type="checkbox"> 隐藏悬浮球</label><div class="menu_button" id="origin_open_btn" style="margin:6px 0">打开 / 收起面板</div><small>面板入口：悬浮球、斜杠命令 /origin（可做成 QR 按钮）、或左下角魔法棒菜单里的「Origin」。详细设置在面板里的⚙。</small></div></div></div>';
     $('#extensions_settings').append(html);
     $('#origin_enabled').prop('checked', settings().enabled).on('change', function(){ settings().enabled=this.checked; saveS(); var r=document.getElementById('origin-root'); if(r) r.style.display=this.checked?'':'none'; });
+  }catch(e){}
+  try{
+    $('#origin_hideorb').prop('checked', !!settings().hideOrb).on('change', function(){ settings().hideOrb=this.checked; saveS(); applyOrb(); });
+    $('#origin_open_btn').on('click', togglePanel);
+  }catch(e){}
+  // 斜杠命令 /origin：打开或收起面板（可放进 QR 快速回复按钮）
+  try{
+    const ctx=getContext(); let ok=false;
+    try{ if(ctx.SlashCommandParser && ctx.SlashCommand){ ctx.SlashCommandParser.addCommandObject(ctx.SlashCommand.fromProps({ name:'origin', callback:()=>{ togglePanel(); return ''; }, helpString:'打开或收起 Origin 系统面板' })); ok=true; } }catch(_){}
+    if(!ok && typeof ctx.registerSlashCommand==='function'){ ctx.registerSlashCommand('origin', ()=>{ togglePanel(); return ''; }, [], '打开或收起 Origin 系统面板', true, true); }
+  }catch(e){ console.warn('[Origin] 斜杠命令注册失败', e); }
+  // 魔法棒菜单入口
+  try{
+    const add=()=>{ const m=document.getElementById('extensionsMenu'); if(!m || document.getElementById('origin_wand')) return !!m; const d=document.createElement('div'); d.id='origin_wand'; d.className='list-group-item flex-container flexGap5 interactable'; d.tabIndex=0; d.innerHTML='<div class="fa-solid fa-circle-dot extensionsMenuExtensionButton"></div><span>Origin</span>'; d.addEventListener('click', togglePanel); m.appendChild(d); return true; };
+    if(!add()) setTimeout(add, 3000);
   }catch(e){}
   console.log('[Origin] 已加载',ORIGIN_VER);
 });
