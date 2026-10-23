@@ -1,0 +1,11 @@
+{
+  "display_name": "牛角门·线（故事线）",
+  "loading_order": 103,
+  "requires": [],
+  "optional": [],
+  "js": "index.js",
+  "css": "style.css",
+  "author": "vicliaaa",
+  "version": "0.2",
+  "homePage": ""
+}
